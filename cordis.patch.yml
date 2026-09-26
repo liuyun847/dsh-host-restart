@@ -1,0 +1,44 @@
+# dsh-host-restart 的 profile 层 patch。
+# 2026-09-25 从 profile 的 cordis.patch.yml 迁入：本包自当日成为组合包(bundle)，
+# 宿主按 profile 的 dsh.profile.bundles 加载本包时应用本文件。
+# 启停：插件页「已安装」里本卡的总开关(写 bundles)，或卡片详情里的行级开关
+# (向 profile 的 cordis.patch.yml 写 disabled 覆盖)。
+# 行 id `restart-dsh` 是上述开关与 settings 命名空间的寻址键，勿改。
+#
+# ── 以下为迁移前留在 profile cordis.patch.yml 的原始注释，仅作依据保存 ──────
+# （"回滚/生效"两段的路径已随迁移失效，见本文件顶部说明。）
+# ── 重启工具 restart_dsh:杀 dsh → 看门狗拉起 → 自动把会话续上 ────────────────
+# 语义(2026-09-17 新增):模型调用 restart_dsh 时,插件先写重启标记,再用
+#   WMI(Win32_Process.Create)启动 C:\run\tools\dsh-restart.ps1 —— 必须脱离 dsh 进程树,
+#   否则脚本会随 dsh 一起被 taskkill /T 清理(详见插件 README §3 的逐项实测表)。
+#   脚本流程:等本轮输出落盘(默认 6s)→ 调用桌面 kill_dsh.bat 杀 dsh → 等看门狗回门户
+#   (它判定端口空闲需约 15s)→ 发一次 HTTP 请求触发拉起 → 轮询管理端口 3081 等就绪。
+#   新 dsh 启动时插件读标记 → sessionController.resolveAgent() 恢复原会话 → 注入
+#   「已重启 + 续跑引导」→ 删标记。整轮约 20~40s。
+# 启动通道(本机实测):conhost --headless(0.4s,首选)→ -WindowStyle Hidden(4.5s,回退);
+#   wscript/mshta/cscript 中转在 WMI 下完全不执行(WMI 进程没有交互式 window station),
+#   Start-Process/普通 spawn 仍在 dsh 进程树内 —— 都不会用。
+# 配置(config 字段,全部可选):waitSeconds(默认 6)/bootDelayMs(4000)/staleMs(600000)/
+#   controllerWaitMs(30000)/restartScript/logFile/pendingDir/psExe;非法值 fail loud。
+# 日志:C:\run\tools\dsh-restart.log(插件与脚本共用);标记落盘:
+#   ~\.dsh\storages\dsh-restart\pending.json(成功即删,陈旧/失败改名为 pending.<原因>-*.json)。
+# 边界:只对主会话开放(subagent 会话直接拒绝);看门狗没跑时脚本自行拉起 dsh;
+#   dsh 没被杀掉时脚本放弃拉起(退出码 2),不会产生双实例抢 3080。
+# ⚠ 回滚（迁移后口径）:插件页本卡总开关停用，或
+#   node <工作区>\dsh-plugin-manager\dshpm.mjs remove dsh-host-restart --profile web
+#   + 删 plugins\dsh-host-restart 与 C:\run\tools\dsh-restart.ps1。
+# ⚠ 生效（2026-09-25 亲核，纠正迁移当日的写法）:包内 patch **不会自己触发重组合** —— dsh-hmr
+#   只监视 profile 的 cordis.patch.yml、home 层 cordis.patch.yml、profile 的 package.json
+#   三个输入(dsh-hmr/lib/index.js:353-376),包内本文件不在其中;重组合会重读全部 bundle 层,
+#   所以改完本文件要点一下插件页本卡(或任意行级)开关、或保存 profile patch 的任意一处才生效。
+#   改插件自己的 lib/*.js 仍需重启 dsh(loader 按 URL 缓存已 import 的模块实例)——
+#   而那正好可以用本工具来做。
+# ⚠ 改 lib/*.js 的正确流程(2026-09-17 踩过):file: 依赖在 pnpm 下是**实体拷贝**,
+#   真正被加载的是 node_modules\dsh-host-restart 那份;源目录改了 add 还可能报
+#   "Already up to date" 而跳过 ⇒ 必须 remove 再 add,并对比两份 SHA256。
+#   改前先跑 node --test "test/*.test.mjs" —— inject-coverage 用例专门挡"宿主起不来"那类错
+#   (当天就是漏声明 timer 导致 apply 抛错、新 dsh 每次都在打印 token URL 前崩掉)。
+#   完整四步流程见插件 README §7。
+- insert:
+    - id: restart-dsh
+      name: 'dsh-host-restart'
