@@ -20,6 +20,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   DSH_HOST_COMMAND_LINE,
+  WAIT_SECONDS,
   buildLauncherCommandLine,
   matchesInstanceCommandLine,
   resolveInstanceIdentity,
@@ -119,7 +120,7 @@ test('buildLauncherCommandLine:身份三件套随命令行传给脚本', () => {
     mode: 'headless',
     scriptPath: RESTART_SCRIPT,
     sessionId: 'session-abc',
-    waitSeconds: 6,
+    waitSeconds: WAIT_SECONDS,
     identity: { pid: 4242, profile: 'teamlab', port: 3090 },
     pendingFile: 'C:\\Users\\MLTZ\\.dsh\\storages\\dsh-restart\\pending.json',
   })
@@ -132,7 +133,7 @@ test('buildLauncherCommandLine:身份三件套随命令行传给脚本', () => {
 })
 
 test('buildLauncherCommandLine:身份缺失时不硬编,也不接受可疑 profile 名', () => {
-  const base = { psExe: 'pwsh', mode: 'hidden', scriptPath: RESTART_SCRIPT, sessionId: 's', waitSeconds: 6 }
+  const base = { psExe: 'pwsh', mode: 'hidden', scriptPath: RESTART_SCRIPT, sessionId: 's', waitSeconds: WAIT_SECONDS }
   const noIdentity = buildLauncherCommandLine(base)
   assert.ok(!noIdentity.includes('-DshPid'), noIdentity)
   assert.ok(!noIdentity.includes('-ProfileName'), noIdentity)
