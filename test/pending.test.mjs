@@ -8,14 +8,13 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
   DEFAULT_INJECT_TEXT,
-  DEFAULT_WAIT_SECONDS,
+  WAIT_SECONDS,
   archiveFileName,
   buildInjectText,
   buildLauncherCommandLine,
   buildWmiCreateCommand,
   classifyPending,
   resolveConfig,
-  resolveWaitSeconds,
 } from '../lib/index.js'
 
 const NOW = 1_800_000_000_000
@@ -58,15 +57,11 @@ test('buildInjectText:默认文案带续跑引导,note 追加在末尾', () => {
   assert.ok(withNote.endsWith('补充说明:顺便确认新插件已加载'))
 })
 
-test('resolveWaitSeconds:默认值 / 夹紧 / 非法值回落', () => {
-  assert.equal(resolveWaitSeconds(undefined), DEFAULT_WAIT_SECONDS)
-  assert.equal(resolveWaitSeconds(null), DEFAULT_WAIT_SECONDS)
-  assert.equal(resolveWaitSeconds('abc'), DEFAULT_WAIT_SECONDS)
-  assert.equal(resolveWaitSeconds(10), 10)
-  assert.equal(resolveWaitSeconds('12'), 12)
-  assert.equal(resolveWaitSeconds(1), 2) // 下夹紧
-  assert.equal(resolveWaitSeconds(999), 60) // 上夹紧
-  assert.equal(resolveWaitSeconds(6.6), 7) // 取整
+test('WAIT_SECONDS:等待是常量,配置项 waitSeconds 已失效(配了也按常量走)', () => {
+  assert.equal(WAIT_SECONDS, 2, '等待固定 2s —— 准入判据是调用瞬间的快照,等待越久窗口越宽')
+  assert.equal(resolveConfig(undefined).waitSeconds, WAIT_SECONDS)
+  assert.equal(resolveConfig({ waitSeconds: 60 }).waitSeconds, WAIT_SECONDS, '配置里写大值不再生效')
+  assert.doesNotThrow(() => resolveConfig({ waitSeconds: 0 }), '它已不是配置项,不该再因它抛错')
 })
 
 test('resolveConfig:默认落点与非法配置 fail loud', () => {
@@ -78,16 +73,13 @@ test('resolveConfig:默认落点与非法配置 fail loud', () => {
   // 启动原语默认必须是"真实那个":桩只能由测试显式传入,resolveConfig 绝不提供默认桩
   // (2026-09-21 事故:restartScript/psExe/启动层都没被覆盖,放行用例真的去起了进程)
   assert.equal(resolved.wmiExec, undefined)
-  assert.equal(resolved.waitSeconds, DEFAULT_WAIT_SECONDS)
 
-  const custom = resolveConfig({ home: 'D:\\dsh-home', waitSeconds: 9, psExe: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' })
+  const custom = resolveConfig({ home: 'D:\\dsh-home', psExe: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' })
   assert.equal(custom.pendingFile, 'D:\\dsh-home\\storages\\dsh-restart\\pending.json')
-  assert.equal(custom.waitSeconds, 9)
 
-  assert.throws(() => resolveConfig({ waitSeconds: 0 }), /waitSeconds/)
-  assert.throws(() => resolveConfig({ waitSeconds: 61 }), /waitSeconds/)
-  assert.throws(() => resolveConfig({ waitSeconds: 3.5 }), /waitSeconds/)
+  assert.throws(() => resolveConfig({ staleMs: 0 }), /staleMs/)
   assert.throws(() => resolveConfig({ bootDelayMs: -1 }), /bootDelayMs/)
+  assert.throws(() => resolveConfig({ controllerWaitMs: 3.5 }), /controllerWaitMs/)
   assert.throws(() => resolveConfig({ wmiExec: 'not-a-function' }), /wmiExec/)
 })
 
@@ -97,12 +89,12 @@ test('buildLauncherCommandLine:headless 首选通道用 conhost --headless 包�
     mode: 'headless',
     scriptPath: 'C:\\run\\tools\\dsh-restart.ps1',
     sessionId: 'session-11111111-2222-3333-4444-555555555555',
-    waitSeconds: 8,
+    waitSeconds: WAIT_SECONDS,
   })
   assert.ok(line.startsWith('conhost.exe --headless "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -NonInteractive'))
   assert.ok(line.includes('-ExecutionPolicy Bypass -File "C:\\run\\tools\\dsh-restart.ps1"'))
   assert.ok(line.includes('-SessionId "session-11111111-2222-3333-4444-555555555555"'))
-  assert.ok(line.endsWith('-WaitSeconds 8'))
+  assert.ok(line.endsWith(`-WaitSeconds ${WAIT_SECONDS}`))
 })
 
 test('buildLauncherCommandLine:hidden 回退通道不依赖 conhost', () => {
@@ -111,10 +103,10 @@ test('buildLauncherCommandLine:hidden 回退通道不依赖 conhost', () => {
     mode: 'hidden',
     scriptPath: 'C:\\run\\tools\\dsh-restart.ps1',
     sessionId: 'session-11111111-2222-3333-4444-555555555555',
-    waitSeconds: 8,
+    waitSeconds: WAIT_SECONDS,
   })
   assert.ok(line.startsWith('"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass'))
-  assert.ok(line.endsWith('-WaitSeconds 8'))
+  assert.ok(line.endsWith(`-WaitSeconds ${WAIT_SECONDS}`))
   assert.ok(!line.includes('conhost'))
 })
 
