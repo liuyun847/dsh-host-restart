@@ -10,7 +10,7 @@
 ## 1. 时序
 
 ```
-模型调用 restart_dsh(note?, wait_seconds?)
+模型调用 restart_dsh(note?)
    │
    ├─① 插件写标记 $DSH_HOME/storages/dsh-restart/pending.json
    │      { sessionId, text:"已重启。…", createdAt, waitSeconds, pidBefore }
@@ -20,7 +20,7 @@
    └─④ 工具结果要求模型立刻结束本轮输出
                  │
    [dsh-restart.ps1]（独立进程，父级是 WmiPrvSE.exe）
-     a. 单实例保护 → 解析本实例身份(-DshPid/-ProfileName/-Port) → 等 WaitSeconds(默认 6s，让本轮输出落盘)
+     a. 单实例保护 → 解析本实例身份(-DshPid/-ProfileName/-Port) → 等 WaitSeconds(固定 2s，只够本次工具结果落盘)
      b. 只杀**本实例**的 dsh：精确 pid(命令行已校验)优先 → 退按 profile 名 + 端口扫描 →
         仍确定不了 ⇒ 退出码 4，一个进程都不杀（fail closed）
         · dsh 没被杀掉 ⇒ 放弃，退出码 2（避免拉起后 EADDRINUSE 假崩溃）
@@ -41,12 +41,12 @@
      → agent.followup("已重启。…") → 删标记
 ```
 
-整轮耗时约 20–40 秒。2026-09-17 实测一次**工具发起**的重启（`wait_seconds=15`）全程 **39 秒**：
+整轮耗时：看门狗在场约 **26 秒**，不在场约 **11 秒**。依据是 2026-09-17 实测的一次**工具发起**的重启（当时 `wait_seconds=15`，全程 39 秒：
 15s 静默 + 1s 杀进程 + 15s 看门狗回门户 + 2s 新 dsh 启动 + 4s 注入延迟 + 2s 注入。
-其中那 15s 是看门狗判定"端口空闲"的固定开销，与本插件参数无关；把它算进去，
-默认 `wait_seconds=6` 的典型整轮约 **30 秒**。
+其中那 15s 是看门狗判定"端口空闲"的固定开销，与本插件无关；
+静默自 2026-09-27 起固定 **2s**（旧版默认 6s、可由模型传 2~60），上面前两项随之各减 4 秒。
 **看门狗不在场时更快**：那条 15s 固定开销不再发生（脚本探不到看门狗进程就直接自行拉起），
-整轮约 15 秒左右；代价是少了看门狗的 token 自动跳转（见 §4「自行拉起路径的 token」）。
+代价是少了看门狗的 token 自动跳转（见 §4「自行拉起路径的 token」）。
 
 ## 2. 文件与配置
 
@@ -72,11 +72,15 @@
 profile 层在包层之后应用，所以覆写优先）。
 
 插件配置（包内 `cordis.patch.yml` 的 `config` 段，全部可选；profile 层可按 id 覆写）：
-`waitSeconds`(默认 6) / `bootDelayMs`(4000) / `staleMs`(600000) / `controllerWaitMs`(30000) /
-`restartScript` / `logFile` / `pendingDir` / `psExe` / `wmiExec`（仅测试注入的启动原语，见 §6）。
+`bootDelayMs`(4000) / `staleMs`(600000) / `controllerWaitMs`(30000) /
+`restartScript` / `logFile` / `pendingDir` / `psExe` / `wmiExec`（仅测试注入的启动原语，见 §6）/
+`handoffPendingFile`（v0.4.2：交接记录那条退路要读的文件，默认 `<home>\storages\sl-handoff\pending.json`，
+与 `dsh-host-sl` 的默认落点一致；**只读**，测试把它指到临时目录）/
+`deferRecheckMs`（v0.4.2：让位之后的兜底复查延迟，默认 `10000`）。
 非法值会 fail loud（抛错、不注册工具）。
+等待**不是**配置项：`waitSeconds` 自 2026-09-27 起固定为常量 `WAIT_SECONDS = 2`，配置里写它不再生效。
 
-工具参数：`note`（追加到注入文案末尾）、`wait_seconds`（2–60，默认 6，越大越不容易截断本轮输出）。
+工具参数：只有 `note`（追加到注入文案末尾）。
 
 ## 3. 为什么这样启动驱动脚本（本机实测结论）
 
@@ -277,7 +281,7 @@ Get-FileHash ~\.dsh\profiles\web\plugins\dsh-host-restart\lib\index.js,
 两个哈希必须一致 —— **改完源码没同步、或没核对哈希，就等于"改了没生效"**（§8 第 3 条踩过一次）。
 
 不想经历 `remove` 造成的空窗（宿主正在服务用户的会话时）也可以**直接覆盖改动的文件** ——
-那等价于 pnpm 对 `file:` 依赖做的实体拷贝，依赖规格没变时 lockfile 无需更新：
+那对本包这种拷贝文件成立（硬链接文件则要原地改写，直接覆盖会断链），依赖规格没变时 lockfile 无需更新：
 
 ```powershell
 Copy-Item ~\.dsh\profiles\web\plugins\dsh-host-restart\lib\index.js `
