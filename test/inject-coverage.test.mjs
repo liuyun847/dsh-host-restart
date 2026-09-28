@@ -160,11 +160,12 @@ test('apply 正常路径:注册 restart_dsh;卸载时经 ctx.effect 回收工具
 test(`版本行回显 v${VERSION}(排障时用它确认"新版本已生效")`, () => {
   const registered = []
   const disposers = []
-  const { ctx } = makeCtx({ tools: makeTools(registered, disposers), timer: {} })
-  apply(ctx, baseConfig())
+  const handle = makeCtx({ tools: makeTools(registered, disposers), timer: {} })
+  apply(handle.ctx, baseConfig())
   const log = readFileSync(testLog, 'utf8')
   assert.ok(log.includes(`apply: v${VERSION}`), `日志里要有 apply: v${VERSION} 这一行`)
   assert.ok(log.includes(`${HANDOFF_SERVICE}(可选,不进 inject)`), '启动时要回显交接服务的口径')
+  handle.dispose() // 撤掉 apply 排的启动注入定时器:测试不留悬挂副作用
 })
 
 test('slHandoff 服务不进 inject(可选读取:服务缺席时本插件仍要 apply)', () => {
@@ -183,16 +184,17 @@ test('apply 阶段不再探测交接服务(v0.4.1:那一刻必是假阴性,探�
   const logFile = join(scratch, 'apply-probe.log')
   const registered = []
   const disposers = []
-  const { ctx } = makeCtx({
+  const handle = makeCtx({
     tools: makeTools(registered, disposers),
     timer: {},
     [HANDOFF_SERVICE]: { saveAll: () => ({ ok: true, items: [] }) },
   })
-  assert.doesNotThrow(() => apply(ctx, { ...baseConfig(), logFile }))
+  assert.doesNotThrow(() => apply(handle.ctx, { ...baseConfig(), logFile }))
   const log = readFileSync(logFile, 'utf8')
   assert.ok(!log.includes('重启前的交接保存:'), `apply 阶段不许再探测交接服务,实际日志:\n${log}`)
   assert.ok(!log.includes('服务不在场'), '那行假阴性必须消失')
   assert.ok(log.includes(`handoff=${HANDOFF_SERVICE}(可选,不进 inject)`), 'apply 行里的口径回显保留')
+  handle.dispose() // 撤掉 apply 排的启动注入定时器:测试不留悬挂副作用
 })
 
 test('交接保存的调用点在启动驱动脚本之前(顺序:保存 → 写标记 → 起脚本)', () => {
