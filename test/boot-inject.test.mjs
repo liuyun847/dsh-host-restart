@@ -26,6 +26,7 @@ import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import {
   DEFAULT_DEFER_RECHECK_MS,
+  DEFAULT_INJECT_TEXT,
   HANDOFF_PENDING_FILENAME,
   HANDOFF_SERVICE,
   HANDOFF_STORAGE_DIRNAME,
@@ -123,7 +124,7 @@ async function bootScene(options = {}) {
   const pendingDir = join(dir, 'dsh-restart')
   const pendingFile = join(pendingDir, 'pending.json')
   const handoffPendingFile = options.handoffPendingFile ?? join(dir, HANDOFF_STORAGE_DIRNAME, HANDOFF_PENDING_FILENAME)
-  const text = buildInjectText(options.note)
+  const text = buildInjectText()
 
   if (options.marker !== false) {
     mkdirSync(pendingDir, { recursive: true })
@@ -312,7 +313,6 @@ test('summarizeHandoffItems / findUnhandledHandoffItem:摘要形状与"本会话
 
 test('启动注入:交接标记里有本会话的未处理条目 ⇒ 不注入 + 日志 + 排 10s 复查', async () => {
   const scene = await bootScene({
-    note: '重启后先看 TODO',
     handoff: handoffMarker([{ sessionId: SESSION_ID, active: true, activeWhy: ['session'] }]),
   })
   assert.equal(scene.followups.length, 0, '有人接手时本插件一个字节都不许注入')
@@ -333,7 +333,7 @@ test('启动注入:空闲条目(active:false)同样算"有人接手" ⇒ 不注�
 test('启动注入:标记里只有别的会话 / 只有 done:true 的本会话条目 ⇒ 照旧自己注入', async () => {
   const other = await bootScene({ handoff: handoffMarker([{ sessionId: OTHER_ID }]) })
   assert.equal(other.followups.length, 1)
-  assert.ok(other.injected().startsWith('已重启。'), other.injected())
+  assert.equal(other.injected(), DEFAULT_INJECT_TEXT, '照旧注入的就是那句固定文案')
   assert.match(other.log(), /交接记录不会接手本次注入/)
   assert.match(other.log(), new RegExp(`待续标记里没有本会话 ${SESSION_ID} 的未处理条目`))
 
@@ -387,16 +387,16 @@ test('启动注入:恢复会话失败 ⇒ 照旧归档标记、不排复查(与 
 
 // ── C. 兜底(复查)──────────────────────────────────────────────────────────
 
-test('兜底:复查时标记里仍有本会话条目且会话非 running ⇒ 补注入一次(buildInjectText 那条消息)', async () => {
+test('兜底:复查时标记里仍有本会话条目且会话非 running ⇒ 补注入一次(同一条固定文案)', async () => {
   const scene = await bootScene({
-    note: '重启后先看 TODO',
     handoff: handoffMarker([{ sessionId: SESSION_ID, active: true }]),
     status: 'idle',
   })
   assert.equal(scene.followups.length, 0, '第一轮让位')
   await scene.runTimer(1)
   assert.equal(scene.followups.length, 1, '交接记录没接手 ⇒ 自己补一条')
-  assert.equal(scene.injected(), buildInjectText('重启后先看 TODO'), '补注入的正文与"照旧注入"逐字相同')
+  assert.equal(scene.injected(), buildInjectText(), '补注入的正文与"照旧注入"逐字相同')
+  assert.equal(scene.injected(), DEFAULT_INJECT_TEXT, '兜底那条就是固定文案,不拼任何别的内容')
   assert.match(scene.log(), /交接记录没接手\(复查时标记里仍有本会话的未处理条目,且 status=idle 不是 running\),自己兜底注入「已重启」/)
 })
 

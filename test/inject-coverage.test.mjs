@@ -197,6 +197,15 @@ test('apply 阶段不再探测交接服务(v0.4.1:那一刻必是假阴性,探�
   handle.dispose() // 撤掉 apply 排的启动注入定时器:测试不留悬挂副作用
 })
 
+test('工具参数已清零、调用点不再读 args(v0.5.0:note 删掉后不该留下任何参数读取)', () => {
+  const code = codeOnly(source)
+  assert.ok(!/args\?\.note/.test(code), '源码里不该再读 args?.note')
+  assert.ok(!/buildInjectText\(\s*[^)\s]/.test(code), 'buildInjectText 必须无参调用')
+  assert.match(code, /text: buildInjectText\(\),/, '标记里的正文来自无参调用')
+  assert.match(code, /await saveHandoffBeforeRestart\(ctx, session, log\)/, 'saveHandoffBeforeRestart 不再接 note 形参')
+})
+
+
 test('交接保存的调用点在启动驱动脚本之前(顺序:保存 → 写标记 → 起脚本)', () => {
   // 保存若排在启动之后,它就会吃掉驱动脚本那 2 秒静默窗口(工具结果落盘用的);
   // 排在前面只让"发起重启"整体晚一点点。这条顺序是硬要求,用静态位置钉住。
