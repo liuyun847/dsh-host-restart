@@ -41,6 +41,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
+  DEFAULT_INJECT_TEXT,
   HANDOFF_SERVICE,
   LAUNCH_TIMEOUT_MS,
   MAX_LISTED_SESSIONS,
@@ -173,8 +174,10 @@ function makeLauncherStub(options = {}) {
 
 /**
  * slHandoff 服务桩(重启前的交接保存):记录调用次数与参数,按 options 决定返回/抛错。
- * 真实服务由 dsh-host-sl 提供,接口是 `saveAll(options, note?) → {ok, saved, failed, items, message, …}`,
- * `options = {all:true, note, noteSessionId, session}`(v0.4.0 起覆盖**所有活跃会话**)。
+ * 真实服务由 dsh-host-sl 提供,接口是 `saveAll(options) → {ok, saved, failed, items, message, …}`,
+ * `options = {all:true, noteSessionId, session}`(v0.4.0 起覆盖**所有活跃会话**)。
+ * ⚠ v0.5.0 起本插件**不再传 `note`**(注入文案固定,调用方改不了) —— 桩只收一个参数,
+ * 多收一个就说明源码又把它传回来了。
  * @param options.result 自定义返回值(默认一条成功结果)。
  * @param options.throw true ⇒ saveAll() 抛错。
  * @param options.async true ⇒ saveAll() 返回 Promise(验证 await 语义:异步实现也要等它落盘)。
@@ -191,8 +194,8 @@ function makeHandoff(options = {}) {
     createdAt: Date.now(),
   }
   const service = {
-    saveAll: (request, note) => {
-      calls.push({ request, note })
+    saveAll: (request) => {
+      calls.push({ request })
       if (options.throw === true) throw new Error('桩:交接保存炸了')
       return options.async === true ? Promise.resolve(result) : result
     },
@@ -278,7 +281,7 @@ function assertAllowPath({ result, stub, pendingFile }, expected = {}) {
   assert.equal(pending.sessionId, sessionId)
   assert.equal(pending.pidBefore, process.pid)
   assert.equal(pending.waitSeconds, WAIT_SECONDS)
-  assert.ok(pending.text.startsWith('已重启。'), '标记里必须带注入正文')
+  assert.equal(pending.text, DEFAULT_INJECT_TEXT, '标记里必须带固定注入正文(v0.5.0)')
   assert.ok(Math.abs(Date.now() - pending.createdAt) < 60_000, 'createdAt 应当就是刚刚')
   return pending
 }
@@ -648,10 +651,13 @@ test('自己的子代理 + 自己的后台作业在跑 ⇒ 放行,且文案把"�
   assert.match(lastGateLog(), /会话检测: 顶层会话 1 个\(本轮运行 1 个\), 其它有活在跑 0 个/)
 })
 
-test('工具参数只剩 note(wait_seconds 已删,等待不可被调用方放大)', async () => {
+test('工具**没有任何参数**(v0.5.0:note 与 wait_seconds 都已删,注入内容不可被调用方影响)', async () => {
   const scene = await callTool({ agents: { roots: () => [topAgent('session-self', 'running')] } })
-  assert.deepEqual(Object.keys(scene.definition.parameters.properties), ['note'])
+  assert.deepEqual(Object.keys(scene.definition.parameters.properties), [], '参数表必须为空')
   assert.ok(!JSON.stringify(scene.definition.parameters).includes('wait'), '参数表里不该再有等待相关字段')
+  assert.ok(!JSON.stringify(scene.definition.parameters).includes('note'), '参数表里不该再有 note(v0.5.0 删除)')
+  // 描述里也不许再提 note —— 模型看得见的就是这段文字,提了就会去传一个不存在的参数
+  assert.ok(!scene.definition.description.includes('note'), '工具描述里不该再提 note')
 })
 
 test('agents 服务缺失 ⇒ 不抛错、记 warn、照常重启(走到启动层),文案不假装"没有别的会话"', async () => {
@@ -714,16 +720,19 @@ test('重启前会调用 slHandoff.saveAll 保存**所有活跃会话**:结果(�
   const handoff = makeHandoff()
   const scene = await callTool(
     { agents: { roots: () => [topAgent('session-self', 'running')] }, [HANDOFF_SERVICE]: handoff.service },
-    { args: { note: '重启后确认插件已加载' } },
+    { args: { note: '重启后确认插件已加载' } }, // v0.5.0:参数已删,这里故意多传一个,证明它进不了服务与注入内容
   )
   assertAllowPath(scene)
   assert.equal(handoff.calls.length, 1, '放行路径必须恰好调用一次交接保存')
   const [call] = handoff.calls
   assert.equal(call.request.all, true, '必须是"所有活跃会话"模式(不是只存当前这一个)')
-  assert.equal(call.request.noteSessionId, 'session-self', 'note 只该写进发起重启的这个会话')
+  assert.equal(call.request.noteSessionId, 'session-self', 'noteSessionId 仍要带上(v0.7.0 的 dsh-host-sl 不读它,保留形参只为兼容)')
   assert.equal(call.request.session.id, 'session-self', '会话对象也要带上(服务枚举不到时的退路)')
   assert.equal(call.request.session.header.origin, 'main')
-  assert.equal(call.request.note, '重启后确认插件已加载', 'note 必须原样透传给服务(它写进记录的「下一步」)')
+  assert.ok(!Object.hasOwn(call.request, 'note'), 'v0.5.0 起不许再往 saveAll 传 note')
+  assert.ok(!scene.result.message.includes('重启后确认插件已加载'), '调用方传的 note 不该出现在返回文案里')
+  assert.equal(JSON.parse(readFileSync(scene.pendingFile, 'utf8')).text, DEFAULT_INJECT_TEXT,
+    '标记里必须是固定文案,调用方传的 note 一个字都不许拼进去')
   assert.equal(scene.result.handoff.ok, true)
   assert.deepEqual(scene.result.handoff.files, ['C:\\stub\\sl-handoff\\handoff-1.md'])
   assert.ok(scene.result.message.includes('重启前已保存会话交接记录'), scene.result.message)
@@ -863,25 +872,25 @@ test('saveHandoffBeforeRestart 单测:ctx.get 抛错 / 服务缺席 / 服务返�
   const log = (message) => lines.push(message)
 
   const throwing = { get: () => { throw new Error('registry disposed') } }
-  const first = await saveHandoffBeforeRestart(throwing, { id: 's' }, '', log)
+  const first = await saveHandoffBeforeRestart(throwing, { id: 's' }, log)
   assert.equal(first.ok, false)
   assert.match(first.text, /读取 slHandoff 服务抛错/)
   assert.equal(lines.length, 1, '只记一行日志')
 
   lines.length = 0
-  const second = await saveHandoffBeforeRestart({ get: () => undefined }, { id: 's' }, '', log)
+  const second = await saveHandoffBeforeRestart({ get: () => undefined }, { id: 's' }, log)
   assert.equal(second.ok, false)
   assert.match(second.text, /服务不可用/)
   assert.equal(lines.length, 1)
 
   lines.length = 0
-  const third = await saveHandoffBeforeRestart({ get: () => ({ saveAll: () => undefined }) }, { id: 's' }, '', log)
+  const third = await saveHandoffBeforeRestart({ get: () => ({ saveAll: () => undefined }) }, { id: 's' }, log)
   assert.equal(third.ok, false, '服务返回 undefined(形态漂移)也算失败,不许当成成功')
   assert.match(third.text, /ok:false\(无说明\)/)
   assert.equal(lines.length, 1)
 
   lines.length = 0
-  const noGet = await saveHandoffBeforeRestart({}, { id: 's' }, '', log)
+  const noGet = await saveHandoffBeforeRestart({}, { id: 's' }, log)
   assert.equal(noGet.ok, false)
   assert.equal(lines.length, 1)
 })

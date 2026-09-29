@@ -46,15 +46,17 @@ test('classifyPending:fresh / stale / invalid 三分支', () => {
   assert.equal(classifyPending({ ...fresh, createdAt: NOW + 30_000 }, NOW, 600_000), 'fresh')
 })
 
-test('buildInjectText:默认文案带续跑引导,note 追加在末尾', () => {
+test('buildInjectText:恒返回固定文案(v0.5.0),任何传进来的 note 都不会被拼进去', () => {
+  // 固定文案就是这一句(用户 2026-09-29 拍板):只叫醒会话,不带任何本插件的解释
+  assert.equal(DEFAULT_INJECT_TEXT, 'dsh已重启,继续')
+  assert.equal(buildInjectText(), DEFAULT_INJECT_TEXT)
+  // 参数已随工具参数一并删除,但函数**保留**了签名容忍度:传什么都不改变结果
   assert.equal(buildInjectText(undefined), DEFAULT_INJECT_TEXT)
   assert.equal(buildInjectText('   '), DEFAULT_INJECT_TEXT)
-  assert.ok(DEFAULT_INJECT_TEXT.startsWith('已重启。'))
-  assert.ok(DEFAULT_INJECT_TEXT.includes('请继续重启前未完成的工作'))
-
   const withNote = buildInjectText('  顺便确认新插件已加载  ')
-  assert.ok(withNote.startsWith(DEFAULT_INJECT_TEXT))
-  assert.ok(withNote.endsWith('补充说明:顺便确认新插件已加载'))
+  assert.equal(withNote, DEFAULT_INJECT_TEXT, '传了 note 也必须逐字等于固定文案')
+  assert.ok(!withNote.includes('顺便确认'), 'note 内容一个字都不许出现在注入正文里')
+  assert.ok(!withNote.includes('补充说明'), 'v0.5.0 起不再有「补充说明」这种拼接')
 })
 
 test('WAIT_SECONDS:等待是常量,配置项 waitSeconds 已失效(配了也按常量走)', () => {
