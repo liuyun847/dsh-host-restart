@@ -196,9 +196,9 @@ dsh 的 pwsh 工具走 `dsh-subprocess-local`，Windows 上 `detached:false` 且
 
 ```powershell
 cd ~\.dsh\profiles\web\plugins\dsh-host-restart
-node --test "test/*.test.mjs"     # 98 个用例,分布在六个文件:
+node --test "test/*.test.mjs"     # 99 个用例,分布在六个文件:
                                   #   pending(8):标记判定 / 注入文案 / 启动命令行 / 配置校验(纯函数)
-                                  #   inject-coverage(10):静态断言 ctx.<service> 都已声明 inject、
+                                  #   inject-coverage(11):静态断言 ctx.<service> 都已声明 inject、
                                   #     代码里不再有 required:false / wait_seconds、apply 任何情况下都不抛回 loader、
                                   #     **slHandoff 不在 inject 里(可选读取)**、**保存→写标记→起脚本的顺序**
                                   #   session-gate(41):多会话检测 —— 三条口径(本轮/子代理/作业)的
