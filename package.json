@@ -1,7 +1,7 @@
 {
   "name": "dsh-host-restart",
-  "description": "DSH 宿主插件:给模型一个 restart_dsh 工具 —— 写重启标记并用 WMI 启动脱离 dsh 进程树的驱动脚本,杀掉当前 dsh 后由常驻看门狗拉起新进程,新进程再用 sessionController 恢复原会话并注入固定文案「dsh已重启,继续」继续对话;重启前还会经可选服务 slHandoff(dsh-host-sl 提供)把对方的活跃工作表刷到最新;重启从不被拒绝 —— 检测到别的会话有活在跑时只在日志与返回文案里如实列出会被打断的会话(2026-09-28 起);v0.4.2 起与 dsh-host-sl 的【sl 交接续跑】合并成一次注入:交接记录会接手时本插件不自己注入,10s 后复查兜底(2026-09-29);v0.6.0 起**支持 Electron 桌面端** —— 身份判据从 profile/端口改成 pid+exe 路径、拉起方式从「看门狗换手」改成「杀整棵同 exe 进程树 + 冷启动应用」(2026-09-30);v0.5.0 起工具**不再有任何参数** —— 删掉 note 参数、注入文案固定成「dsh已重启,继续」,调用方再也改不了注入内容(2026-09-29)",
-  "version": "0.6.0",
+  "description": "DSH 宿主插件:给模型一个 restart_dsh 工具 —— 写重启标记并用 WMI 启动脱离 dsh 进程树的驱动脚本,杀掉当前 dsh 后由常驻看门狗拉起新进程,新进程再用 sessionController 恢复原会话并注入固定文案「dsh已重启,继续」继续对话;重启前还会经可选服务 slHandoff(dsh-host-sl 提供)把对方的活跃工作表刷到最新;重启从不被拒绝 —— 检测到别的会话有活在跑时只在日志与返回文案里如实列出会被打断的会话(2026-09-28 起);v0.4.2 起与 dsh-host-sl 的【sl 交接续跑】合并成一次注入:交接记录会接手时本插件不自己注入,10s 后复查兜底(2026-09-29);v0.6.0 起**支持 Electron 桌面端** —— 身份判据从 profile/端口改成 pid+exe 路径、拉起方式从「看门狗换手」改成「杀整棵同 exe 进程树 + 冷启动应用」(2026-09-30);v0.5.0 起工具**不再有任何参数** —— 删掉 note 参数、注入文案固定成「dsh已重启,继续」,调用方再也改不了注入内容(2026-09-29);v0.7.0 起**新增人工指令 `/restart`** —— 与工具共用同一个执行体 performRestart(会话校验/会话检测/交接保存/写标记/起脚本一个字节都不分叉),差别只在失败文案前缀与成功文案说给谁听;人可以直接在输入框敲指令重启,不必再经模型(2026-10-03)",
+  "version": "0.7.0",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -17,12 +17,25 @@
   },
   "files": [
     "lib",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "README.md"
   ],
   "scripts": {
     "test": "node --test \"test/*.test.mjs\""
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liuyun847/dsh-host-restart.git"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "restart",
+    "session-resume"
+  ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-llm": "^0.2.0-rc.2",

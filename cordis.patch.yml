@@ -5,6 +5,12 @@
 # (向 profile 的 cordis.patch.yml 写 disabled 覆盖)。
 # 行 id `restart-dsh` 是上述开关与 settings 命名空间的寻址键，勿改。
 #
+# ⚠ 2026-10-03 变更(v0.7.0;本文件内容未变,只是留档):插件新增人工指令 `/restart` ——
+#   与 restart_dsh 工具**共用同一个执行体** performRestart(会话校验/会话检测/交接保存/写标记/
+#   起脚本),行为完全一致:照旧注入「dsh已重启,继续」、交接记录在场时照旧让位给 dsh-host-sl。
+#   差别只有失败文案前缀与成功文案说给谁听。注册走 commands 服务且**不进 inject**(可选读取,
+#   服务缺席只写一行日志)。行为变化全在 lib/index.js 里 ⇒ **要重启 dsh 才生效**;本 patch 文件
+#   一个字节都没改,所以不需要点开关触发重组合。详见插件 README §15。
 # ⚠ 2026-09-28 变更(与下方留档注释冲突时以本节为准):
 #   · **重启不再被拒绝**:其它会话有活在跑时,检测照旧跑(口径三条),但结果只进日志与工具返回
 #     文案(点名会话 id + 原因 + 交接记录存没存下),然后照常重启;理由与代价见插件 README §4。
@@ -18,7 +24,7 @@
 # （"回滚/生效"两段的路径已随迁移失效，见本文件顶部说明。）
 # ── 重启工具 restart_dsh:杀 dsh → 看门狗拉起 → 自动把会话续上 ────────────────
 # 语义(2026-09-17 新增):模型调用 restart_dsh 时,插件先写重启标记,再用
-#   WMI(Win32_Process.Create)启动 C:\run\tools\dsh-restart.ps1 —— 必须脱离 dsh 进程树,
+#   WMI(Win32_Process.Create)启动 <工具目录>\dsh-restart.ps1 —— 必须脱离 dsh 进程树,
 #   否则脚本会随 dsh 一起被 taskkill /T 清理(详见插件 README §3 的逐项实测表)。
 #   脚本流程:等本轮输出落盘(默认 6s)→ 调用桌面 kill_dsh.bat 杀 dsh → 等看门狗回门户
 #   (它判定端口空闲需约 15s)→ 发一次 HTTP 请求触发拉起 → 轮询管理端口 3081 等就绪。
@@ -29,13 +35,13 @@
 #   Start-Process/普通 spawn 仍在 dsh 进程树内 —— 都不会用。
 # 配置(config 字段,全部可选):waitSeconds(默认 6)/bootDelayMs(4000)/staleMs(600000)/
 #   controllerWaitMs(30000)/restartScript/logFile/pendingDir/psExe;非法值 fail loud。
-# 日志:C:\run\tools\dsh-restart.log(插件与脚本共用);标记落盘:
+# 日志:<工具目录>\dsh-restart.log(插件与脚本共用);标记落盘:
 #   ~\.dsh\storages\dsh-restart\pending.json(成功即删,陈旧/失败改名为 pending.<原因>-*.json)。
 # 边界:只对主会话开放(subagent 会话直接拒绝);看门狗没跑时脚本自行拉起 dsh;
 #   dsh 没被杀掉时脚本放弃拉起(退出码 2),不会产生双实例抢 3080。
 # ⚠ 回滚（迁移后口径）:插件页本卡总开关停用，或
 #   node <工作区>\dsh-plugin-manager\dshpm.mjs remove dsh-host-restart --profile web
-#   + 删 plugins\dsh-host-restart 与 C:\run\tools\dsh-restart.ps1。
+#   + 删 plugins\dsh-host-restart 与 <工具目录>\dsh-restart.ps1。
 # ⚠ 生效（2026-09-25 亲核，纠正迁移当日的写法）:包内 patch **不会自己触发重组合** —— dsh-hmr
 #   只监视 profile 的 cordis.patch.yml、home 层 cordis.patch.yml、profile 的 package.json
 #   三个输入(dsh-hmr/lib/index.js:353-376),包内本文件不在其中;重组合会重读全部 bundle 层,

@@ -30,10 +30,10 @@ import {
 } from '../lib/index.js'
 
 // 本机真实形态(2026-09-30 取自活进程命令行,已截去无关尾部)
-const EXE = 'C:\\Users\\MLTZ\\AppData\\Local\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe'
-const HOST_ENTRY = 'C:\\Users\\MLTZ\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\app.asar\\dsh\\node_modules\\@deepseek-ai\\dsh-desktop-host\\lib\\index.js'
-const RUNTIME = 'C:\\Users\\MLTZ\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\app.asar\\dsh'
-const PROJECT = 'C:\\Users\\MLTZ\\.dsh\\profiles\\desktop'
+const EXE = 'C:\\Users\\tester\\AppData\\Local\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe'
+const HOST_ENTRY = 'C:\\Users\\tester\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\app.asar\\dsh\\node_modules\\@deepseek-ai\\dsh-desktop-host\\lib\\index.js'
+const RUNTIME = 'C:\\Users\\tester\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\app.asar\\dsh'
+const PROJECT = 'C:\\Users\\tester\\.dsh\\profiles\\desktop'
 
 /**
  * 后端 Host 子进程(插件就跑在这里面)的真实 **argv**。
@@ -46,22 +46,22 @@ const HOST_ARGV = [
   HOST_ENTRY,
   RUNTIME,
   PROJECT,
-  'C:\\Users\\MLTZ\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\primary-runtime',
-  'C:\\Users\\MLTZ\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\pnpm\\bin\\pnpm.mjs',
-  'C:\\Users\\MLTZ\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\bin',
+  'C:\\Users\\tester\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\primary-runtime',
+  'C:\\Users\\tester\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\pnpm\\bin\\pnpm.mjs',
+  'C:\\Users\\tester\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\runtime\\bin',
 ]
 /** 同一条进程的**原始命令行**(取自 Win32_Process.CommandLine,含 --expose-internals) */
 const HOST_COMMAND_LINE = `"${EXE}" --expose-internals "${HOST_ENTRY}" "${RUNTIME}"`
 /** 主进程:命令行就是 exe 本身(实测,无任何参数) */
 const MAIN_ARGV = [EXE]
 /** 渲染进程:有 --type= */
-const RENDERER_ARGV = [EXE, '--type=renderer', `--user-data-dir=C:\\Users\\MLTZ\\AppData\\Roaming\\@deepseek-ai/dsh-desktop`]
+const RENDERER_ARGV = [EXE, '--type=renderer', `--user-data-dir=C:\\Users\\tester\\AppData\\Roaming\\@deepseek-ai/dsh-desktop`]
 /** 工具子进程壳(dsh-subprocess-local 的 runner):同一 exe、命令行里提到入口路径,但**不是**宿主 */
 const RUNNER_ARGV = [EXE, `${RUNTIME}\\node_modules\\@deepseek-ai\\dsh-subprocess-local\\lib\\runner.js`, '--', 'pwsh.exe']
 /** web 宿主(退役但仍在的另一条路):不能被桌面判据命中 */
-const WEB_ARGV = ['C:\\Program Files\\nodejs\\node.exe', 'C:\\Users\\MLTZ\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js', 'web', '--no-open', '--port', '3080']
+const WEB_ARGV = ['C:\\Program Files\\nodejs\\node.exe', 'C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js', 'web', '--no-open', '--port', '3080']
 
-const RESTART_SCRIPT = join('C:\\run\\tools', 'dsh-restart.ps1')
+const RESTART_SCRIPT = join('<工具目录>', 'dsh-restart.ps1')
 
 // ── 1) 认出桌面端 ──────────────────────────────────────────────────────────
 
@@ -161,7 +161,7 @@ test('matchesInstanceCommandLine:桌面端按 exe 路径命中(整棵树的进�
 })
 
 test('matchesInstanceCommandLine:web 分支行为一字不变', () => {
-  const webLine = `"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\MLTZ\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js web --no-open --port 3080`
+  const webLine = `"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js web --no-open --port 3080`
   assert.equal(matchesInstanceCommandLine(webLine, { profile: 'web', port: 3080 }), true)
   assert.equal(matchesInstanceCommandLine(webLine, { profile: 'teamlab', port: 3090 }), false)
   // 桌面身份传给 web 命令行时不该命中(判据互不串台)
@@ -178,7 +178,7 @@ test('buildLauncherCommandLine:桌面端传 -Mode desktop 与 -DesktopExe', () =
     sessionId: 'session-abc',
     waitSeconds: 2,
     identity: { mode: 'desktop', pid: 27936, exe: EXE, port: 19387 },
-    pendingFile: 'C:\\Users\\MLTZ\\.dsh\\storages\\dsh-restart\\pending.json',
+    pendingFile: 'C:\\Users\\tester\\.dsh\\storages\\dsh-restart\\pending.json',
   })
   assert.ok(line.includes('-Mode desktop'), line)
   assert.ok(line.includes(`-DesktopExe "${EXE}"`), line)

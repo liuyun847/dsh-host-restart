@@ -27,13 +27,13 @@ import {
 } from '../lib/index.js'
 
 // 本机真实形态(取自 2026-09-21 的活进程命令行,已脱敏:不含 token/URL)
-const ENTRY = 'C:\\Users\\MLTZ\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js'
+const ENTRY = 'C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js'
 const WEB_LINE = `"C:\\Program Files\\nodejs\\node.exe" ${ENTRY} web --no-open --port 3080`
 const TEAMLAB_LINE = `"C:\\Program Files\\nodejs\\node.exe" ${ENTRY} teamlab --no-open --port 3090`
 /** dsh 子进程 runner 会把整条 PowerShell 命令文本带进命令行 —— 命中了就是误杀别的进程。 */
-const RUNNER_LINE = `"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\MLTZ\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\node_modules\\@deepseek-ai\\dsh-subprocess-local\\lib\\runner.js -- "pwsh.exe" -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'dsh\\lib\\bin.js' }"`
+const RUNNER_LINE = `"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\node_modules\\@deepseek-ai\\dsh-subprocess-local\\lib\\runner.js -- "pwsh.exe" -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'dsh\\lib\\bin.js' }"`
 
-const RESTART_SCRIPT = join('C:\\run\\tools', 'dsh-restart.ps1')
+const RESTART_SCRIPT = join('<工具目录>', 'dsh-restart.ps1')
 const argv = (...tail) => ['C:\\Program Files\\nodejs\\node.exe', ENTRY, ...tail]
 
 // ── 1) 身份解析 ────────────────────────────────────────────────────────────
@@ -122,13 +122,13 @@ test('buildLauncherCommandLine:身份三件套随命令行传给脚本', () => {
     sessionId: 'session-abc',
     waitSeconds: WAIT_SECONDS,
     identity: { pid: 4242, profile: 'teamlab', port: 3090 },
-    pendingFile: 'C:\\Users\\MLTZ\\.dsh\\storages\\dsh-restart\\pending.json',
+    pendingFile: 'C:\\Users\\tester\\.dsh\\storages\\dsh-restart\\pending.json',
   })
   assert.ok(line.includes('-DshPid 4242'), line)
   assert.ok(line.includes('-ProfileName "teamlab"'), line)
   assert.ok(line.includes('-Port 3090'), line)
   assert.ok(line.includes('-SessionId "session-abc"'), line)
-  assert.ok(line.includes('-PendingFile "C:\\Users\\MLTZ\\.dsh\\storages\\dsh-restart\\pending.json"'), line)
+  assert.ok(line.includes('-PendingFile "C:\\Users\\tester\\.dsh\\storages\\dsh-restart\\pending.json"'), line)
   assert.ok(line.includes('conhost.exe --headless'), '首选通道不变')
 })
 

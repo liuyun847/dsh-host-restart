@@ -20,10 +20,10 @@
  *
  * ⚠ 2026-09-21 事故 + 本文件的加固(动这个文件之前先读完这段):
  *   上一版只 apply 了 { logFile, pendingDir },而决定「启动哪个脚本 / 用哪个 pwsh」的
- *   restartScript(默认 C:\run\tools\dsh-restart.ps1)与 psExe(默认 pwsh)**没被覆盖**,
+ *   restartScript(默认 <工具目录>\dsh-restart.ps1)与 psExe(默认 pwsh)**没被覆盖**,
  *   于是五个"应当放行"的用例真的走通了 writePendingFile → launchDriver → execFile(pwsh, WMI Create):
  *   6~7 秒后真驱动脚本杀掉 dsh,同时掐掉另外两个会话。而它们"看起来通过了" ——
- *   断言等的是测试自己的 logFile,真驱动写的是 C:\run\tools\dsh-restart.log,永远等不到启动确认
+ *   断言等的是测试自己的 logFile,真驱动写的是 <工具目录>\dsh-restart.log,永远等不到启动确认
  *   ⇒ 换通道再启一次 ⇒ 最后抛错 ⇒ 断言"通过"。假阴性盖住了真实副作用。
  *
  *   现在放行路径有三道互不重叠的防线,**任意一道成立都不可能起真实进程**:
@@ -267,7 +267,7 @@ function assertAllowPath({ result, stub, pendingFile }, expected = {}) {
   assert.ok(wmiScript.includes('Win32_Process'), '桩收到的应当是一段 Win32_Process.Create 脚本')
   assert.ok(wmiScript.includes(FAKE_SCRIPT), '命令行里必须是假脚本路径')
   assert.ok(!wmiScript.includes('dsh-restart.ps1'), '命令行里绝不能出现真实驱动脚本')
-  assert.ok(!wmiScript.includes('C:\\run\\tools'), '命令行里绝不能出现 C:\\run\\tools 下的真实路径')
+  assert.ok(!wmiScript.includes('<工具目录>'), '命令行里绝不能出现 <工具目录> 下的真实路径')
   assert.ok(wmiScript.includes(`-SessionId "${sessionId}"`), '命令行必须带上发起者会话 id')
   assert.ok(wmiScript.includes(`-WaitSeconds ${WAIT_SECONDS}`), `等待必须固定为 ${WAIT_SECONDS}s(参数已删,不可被调用方放大)`)
   // 实例身份:驱动脚本据此只杀"本实例"的 dsh。测试进程 argv 里没有 profile/端口 ⇒ 只带 pid,
@@ -925,13 +925,13 @@ test('拿不到归属会话 / 子代理发起 ⇒ 仍在检测与交接保存之
   assertNothingHappened(sub)
 })
 
-// ── 交接服务的探测时机(v0.4.1:首次工具调用时探一次,不再在 apply 时)─────────────
+// ── 交接服务的探测时机(v0.4.1:首次调用时探一次,不再在 apply 时)─────────────
 //
 // 背景:apply 那一刻同进程的 dsh-host-sl 还没把服务 provide 出来 ⇒ 旧版每次都写
 // "服务不在场(dsh-host-sl 未装载?)",而稍后的工具调用又看得到它(21:38、23:05 两次 saveAll
-// 都真的存了盘)。那是假阴性,README §5 还把它当排障线索 ⇒ 现在改成首次工具调用时探测。
+// 都真的存了盘)。那是假阴性,README §5 还把它当排障线索 ⇒ 现在改成首次调用时探测。
 
-test('交接服务探测:首次工具调用时写一次"在场",同一插件实例里再调用不再重复写(探测只读,不影响保存)', async () => {
+test('交接服务探测:首次调用时写一次"在场",同一插件实例里再调用不再重复写(探测只读,不影响保存)', async () => {
   const handoff = makeHandoff()
   const registered = []
   const { ctx, dispose } = makeCtx({
@@ -947,7 +947,7 @@ test('交接服务探测:首次工具调用时写一次"在场",同一插件实�
     psExe: FAKE_PS_EXE,
     wmiExec: makeLauncherStub().wmiExec,
   })
-  const before = countIn(readFileSync(testLog, 'utf8'), '服务在场(首次工具调用时探测)')
+  const before = countIn(readFileSync(testLog, 'utf8'), '服务在场(首次调用时探测)')
   // "不一致"那行的计数也要取差值:同一个日志文件里,别的用例(服务在场 + 保存失败)会写它
   const beforeMismatch = countIn(readFileSync(testLog, 'utf8'), '但真实调用没成功')
   const execArgs = { agent: { session: { id: 'session-self', header: { origin: 'main' } } } }
@@ -957,7 +957,7 @@ test('交接服务探测:首次工具调用时写一次"在场",同一插件实�
   assert.equal(first.ok, true, first.message)
   assert.equal(second.ok, true, second.message)
   const log = readFileSync(testLog, 'utf8')
-  assert.equal(countIn(log, '服务在场(首次工具调用时探测)') - before, 1, '只探测一次(第二次调用不再写)')
+  assert.equal(countIn(log, '服务在场(首次调用时探测)') - before, 1, '只探测一次(第二次调用不再写)')
   assert.equal(handoff.calls.length, 2, '探测是只读的:两次工具调用各真实保存一次')
   assert.equal(countIn(log, '但真实调用没成功') - beforeMismatch, 0, '探测与真实结果一致时不该写"不一致"那行')
 })
@@ -969,7 +969,7 @@ test('交接服务探测:服务不在场时也写一次(如实说"未装载"),�
   assert.equal(scene.result.handoff.ok, false, '服务不在场 ⇒ 交接没存下(工具照常)')
   const log = readFileSync(testLog, 'utf8')
   assert.equal(countIn(log, '服务不在场(dsh-host-sl 未装载?)') - before, 1)
-  assert.ok(log.includes('(首次工具调用时探测)'), '两种结论都要标明这是"首次工具调用时探测"的')
+  assert.ok(log.includes('(首次调用时探测)'), '两种结论都要标明这是"首次调用时探测"的')
 })
 
 test('交接服务探测:"在场但没有 saveAll()"(旧版 dsh-host-sl)与"没装"分开写', async () => {

@@ -176,7 +176,7 @@ test('slHandoff 服务不进 inject(可选读取:服务缺席时本插件仍要 
   assert.match(codeOnly(source), /ctx\.get\(HANDOFF_SERVICE\)/, '必须用 ctx.get() 可选读取')
 })
 
-test('apply 阶段不再探测交接服务(v0.4.1:那一刻必是假阴性,探测挪到首次工具调用)', () => {
+test('apply 阶段不再探测交接服务(v0.4.1:那一刻必是假阴性,探测挪到首次调用)', () => {
   // 2026-09-28 实测:apply 时同进程的 dsh-host-sl 还没 provide 服务 ⇒ 旧版每次都写
   // "重启前的交接保存:slHandoff 服务不在场(dsh-host-sl 未装载?),工具照常可用",
   // 而稍后的工具调用又看得到它(21:38、23:05 两次 saveAll 都真的存了盘)。README §5 曾把这行

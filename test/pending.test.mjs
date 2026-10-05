@@ -69,8 +69,8 @@ test('WAIT_SECONDS:等待是常量,配置项 waitSeconds 已失效(配了也按�
 test('resolveConfig:默认落点与非法配置 fail loud', () => {
   const resolved = resolveConfig(undefined)
   assert.ok(resolved.pendingFile.endsWith('storages\\dsh-restart\\pending.json') || resolved.pendingFile.endsWith('storages/dsh-restart/pending.json'))
-  assert.equal(resolved.restartScript, 'C:\\run\\tools\\dsh-restart.ps1')
-  assert.equal(resolved.logFile, 'C:\\run\\tools\\dsh-restart.log')
+  assert.equal(resolved.restartScript, '<工具目录>\\dsh-restart.ps1')
+  assert.equal(resolved.logFile, '<工具目录>\\dsh-restart.log')
   assert.equal(resolved.psExe, 'pwsh')
   // 启动原语默认必须是"真实那个":桩只能由测试显式传入,resolveConfig 绝不提供默认桩
   // (2026-09-21 事故:restartScript/psExe/启动层都没被覆盖,放行用例真的去起了进程)
@@ -89,12 +89,12 @@ test('buildLauncherCommandLine:headless 首选通道用 conhost --headless 包�
   const line = buildLauncherCommandLine({
     psExe: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
     mode: 'headless',
-    scriptPath: 'C:\\run\\tools\\dsh-restart.ps1',
+    scriptPath: '<工具目录>\\dsh-restart.ps1',
     sessionId: 'session-11111111-2222-3333-4444-555555555555',
     waitSeconds: WAIT_SECONDS,
   })
   assert.ok(line.startsWith('conhost.exe --headless "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -NonInteractive'))
-  assert.ok(line.includes('-ExecutionPolicy Bypass -File "C:\\run\\tools\\dsh-restart.ps1"'))
+  assert.ok(line.includes('-ExecutionPolicy Bypass -File "<工具目录>\\dsh-restart.ps1"'))
   assert.ok(line.includes('-SessionId "session-11111111-2222-3333-4444-555555555555"'))
   assert.ok(line.endsWith(`-WaitSeconds ${WAIT_SECONDS}`))
 })
@@ -103,7 +103,7 @@ test('buildLauncherCommandLine:hidden 回退通道不依赖 conhost', () => {
   const line = buildLauncherCommandLine({
     psExe: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
     mode: 'hidden',
-    scriptPath: 'C:\\run\\tools\\dsh-restart.ps1',
+    scriptPath: '<工具目录>\\dsh-restart.ps1',
     sessionId: 'session-11111111-2222-3333-4444-555555555555',
     waitSeconds: WAIT_SECONDS,
   })
@@ -113,7 +113,7 @@ test('buildLauncherCommandLine:hidden 回退通道不依赖 conhost', () => {
 })
 
 test('buildWmiCreateCommand:命令行作为单引号字面量,内部单引号被翻倍', () => {
-  const command = buildWmiCreateCommand('pwsh -File "C:\\run\\tools\\o\'brien.ps1" -SessionId "s-1"')
+  const command = buildWmiCreateCommand('pwsh -File "<工具目录>\\o\'brien.ps1" -SessionId "s-1"')
   assert.ok(command.includes("$ErrorActionPreference = 'Stop'"))
   assert.ok(command.includes("o''brien.ps1"))
   assert.ok(command.includes('Win32_Process'))
