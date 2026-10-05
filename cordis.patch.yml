@@ -40,7 +40,7 @@
 # 边界:只对主会话开放(subagent 会话直接拒绝);看门狗没跑时脚本自行拉起 dsh;
 #   dsh 没被杀掉时脚本放弃拉起(退出码 2),不会产生双实例抢 3080。
 # ⚠ 回滚（迁移后口径）:插件页本卡总开关停用，或
-#   node <工作区>\dsh-plugin-manager\dshpm.mjs remove dsh-host-restart --profile web
+#   node <工作区>\dsh-plugin-manager\dshpm.mjs remove dsh-host-restart --profile desktop
 #   + 删 plugins\dsh-host-restart 与 <工具目录>\dsh-restart.ps1。
 # ⚠ 生效（2026-09-25 亲核，纠正迁移当日的写法）:包内 patch **不会自己触发重组合** —— dsh-hmr
 #   只监视 profile 的 cordis.patch.yml、home 层 cordis.patch.yml、profile 的 package.json
