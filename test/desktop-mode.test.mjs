@@ -18,10 +18,10 @@
  */
 import { strict as assert } from 'node:assert'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   DEFAULT_DESKTOP_PORT,
+  DEFAULT_RESTART_SCRIPT,
   buildLauncherCommandLine,
   isDesktopHostArgv,
   matchesInstanceCommandLine,
@@ -61,7 +61,8 @@ const RUNNER_ARGV = [EXE, `${RUNTIME}\\node_modules\\@deepseek-ai\\dsh-subproces
 /** web 宿主(退役但仍在的另一条路):不能被桌面判据命中 */
 const WEB_ARGV = ['C:\\Program Files\\nodejs\\node.exe', 'C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js', 'web', '--no-open', '--port', '3080']
 
-const RESTART_SCRIPT = join('<工具目录>', 'dsh-restart.ps1')
+// 驱动脚本的**默认落点**(`<DSH_HOME>\tools\dsh-restart.ps1`):装在别处时下面两条交叉校验按"非本机"跳过
+const RESTART_SCRIPT = DEFAULT_RESTART_SCRIPT
 
 // ── 1) 认出桌面端 ──────────────────────────────────────────────────────────
 

@@ -150,8 +150,8 @@
 |---|---|
 | `~/.dsh/profiles/web/plugins/dsh-host-restart/lib/index.js` | 插件本体：注册工具 + 启动时消费标记并注入 |
 | `~/.dsh/profiles/web/plugins/dsh-host-restart/cordis.patch.yml` | 本包自己的注册行 `id: restart-dsh`（**包层 patch**：本包是组合包，由 profile 的 `dsh.profile.bundles` 加载；改它不需要重启，但**不会自己触发重组合**，见 §7 末段） |
-| `<工具目录>\dsh-restart.ps1` | 驱动脚本：解析本实例身份 → 只杀本实例 dsh → **探看门狗**（在就换手+触发，不在就自行拉起）→ 等就绪（退出码 4 = 身份确定不了，一个都不杀） |
-| `<工具目录>\dsh-restart.log` | 插件与脚本**共用**的流程日志（超过 1MB 截断保留尾部） |
+| `<工具目录>\dsh-restart.ps1` | 驱动脚本（**默认落点 `<DSH_HOME>\tools\dsh-restart.ps1`**，可用 `restartScript` 覆盖；脚本本体不随包发布，得自己放到那儿）：解析本实例身份 → 只杀本实例 dsh → **探看门狗**（在就换手+触发，不在就自行拉起）→ 等就绪（退出码 4 = 身份确定不了，一个都不杀） |
+| `<工具目录>\dsh-restart.log` | 插件与脚本**共用**的流程日志（**默认落点 `<DSH_HOME>\tools\dsh-restart.log`**，可用 `logFile` 覆盖；超过 1MB 截断保留尾部） |
 | `~/.dsh/storages/dsh-restart/pending.json` | 重启标记；成功注入即删，陈旧/失败改名归档为 `pending.<原因>-<时间>.json` |
 | `<工具目录>\dsh-selflaunch-out.log` / `dsh-selflaunch-err.log` | 脚本**自行拉起** dsh 时的 stdout/stderr（每轮**覆盖写**，不是追加）。默认与 `-LogFile` 同目录，可用 `-SelfLaunchLogDir` 覆盖 |
 | `<工具目录>\dsh-last-url.txt` | 最近一次自起 dsh 的**带 token 完整 URL**（覆盖写、只保留最近一次）。用途：清 cookie / 换浏览器时取一次；重启日志里只记"已取得带 token 的 URL"，不留 token 明文 |
@@ -175,6 +175,10 @@ profile 层在包层之后应用，所以覆写优先）。
 与 `dsh-host-sl` 的默认落点一致；**只读**，测试把它指到临时目录）/
 `deferRecheckMs`（v0.4.2：让位之后的兜底复查延迟，默认 `10000`）。
 非法值会 fail loud（抛错、不注册工具）。
+
+驱动脚本与日志的**默认落点**是 **DSH home 下的 `tools` 目录**：`<DSH_HOME>\tools\dsh-restart.ps1`
+与 `<DSH_HOME>\tools\dsh-restart.log`（`DSH_HOME` 未设时用 `~\.dsh`，与 `pendingDir` 的算法一致）。
+驱动脚本本体**不随包发布** —— 装到默认落点，或用 `restartScript` / `logFile` 指到你放脚本的地方。
 等待**不是**配置项：`waitSeconds` 自 2026-09-27 起固定为常量 `WAIT_SECONDS = 2`，配置里写它不再生效
 （理由见 §4「为什么等待仍固定成 2s」）。
 
@@ -390,6 +394,9 @@ dsh 的 pwsh 工具走 `dsh-subprocess-local`，Windows 上 `detached:false` 且
   所以"改完插件之后的第一次重启"不会空转。
 
 ## 5. 排障
+
+下面写的 `<工具目录>` 指**驱动脚本与日志所在的目录**：默认是 `<DSH_HOME>\tools`（`DSH_HOME` 未设时
+即 `~\.dsh\tools`），用 `restartScript` / `logFile` 改过就以配置为准（见 §2）。
 
 | 现象 | 查什么 |
 |---|---|

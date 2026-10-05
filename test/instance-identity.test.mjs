@@ -16,9 +16,9 @@
  */
 import { strict as assert } from 'node:assert'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { test } from 'node:test'
 import {
+  DEFAULT_RESTART_SCRIPT,
   DSH_HOST_COMMAND_LINE,
   WAIT_SECONDS,
   buildLauncherCommandLine,
@@ -33,7 +33,8 @@ const TEAMLAB_LINE = `"C:\\Program Files\\nodejs\\node.exe" ${ENTRY} teamlab --n
 /** dsh 子进程 runner 会把整条 PowerShell 命令文本带进命令行 —— 命中了就是误杀别的进程。 */
 const RUNNER_LINE = `"C:\\Program Files\\nodejs\\node.exe" C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\node_modules\\@deepseek-ai\\dsh-subprocess-local\\lib\\runner.js -- "pwsh.exe" -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'dsh\\lib\\bin.js' }"`
 
-const RESTART_SCRIPT = join('<工具目录>', 'dsh-restart.ps1')
+// 驱动脚本的**默认落点**(`<DSH_HOME>\tools\dsh-restart.ps1`):装在别处时下面那条交叉校验按"非本机"跳过
+const RESTART_SCRIPT = DEFAULT_RESTART_SCRIPT
 const argv = (...tail) => ['C:\\Program Files\\nodejs\\node.exe', ENTRY, ...tail]
 
 // ── 1) 身份解析 ────────────────────────────────────────────────────────────

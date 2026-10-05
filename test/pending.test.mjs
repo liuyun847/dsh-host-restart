@@ -5,6 +5,8 @@
  * 跑法:node --test "test/*.test.mjs"(或 npm test)
  */
 import { strict as assert } from 'node:assert'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   DEFAULT_INJECT_TEXT,
@@ -18,6 +20,10 @@ import {
 } from '../lib/index.js'
 
 const NOW = 1_800_000_000_000
+// 默认落点期望值在测试里**独立算一遍**(不直接读插件的导出常量),这样"默认值改坏了"能被抓住:
+// 驱动脚本与日志默认在 <DSH_HOME>\tools 下(与 resolveConfig 的 pendingDir 同一条 home 算法)。
+const TOOLS_DIR = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'tools')
+const DEFAULT_SCRIPT = join(TOOLS_DIR, 'dsh-restart.ps1')
 
 test('archiveFileName:时间戳不带分隔符,不会出现 "..json" 这类名字', () => {
   const name = archiveFileName('C:\\x\\pending.json', 'stale', new Date('2026-09-16T21:55:14.293Z'))
@@ -69,8 +75,12 @@ test('WAIT_SECONDS:等待是常量,配置项 waitSeconds 已失效(配了也按�
 test('resolveConfig:默认落点与非法配置 fail loud', () => {
   const resolved = resolveConfig(undefined)
   assert.ok(resolved.pendingFile.endsWith('storages\\dsh-restart\\pending.json') || resolved.pendingFile.endsWith('storages/dsh-restart/pending.json'))
-  assert.equal(resolved.restartScript, '<工具目录>\\dsh-restart.ps1')
-  assert.equal(resolved.logFile, '<工具目录>\\dsh-restart.log')
+  assert.equal(resolved.restartScript, DEFAULT_SCRIPT)
+  assert.equal(resolved.logFile, join(TOOLS_DIR, 'dsh-restart.log'))
+  // 2026-10-05:默认值曾是脱敏脚本留下的 `<工具目录>\…` 占位符,而 `<` `>` 在 Windows 路径里非法
+  // ⇒ 钉住"默认落点必须是能真实使用的合法路径"(占位符写法会让全新安装拿到一个不可能存在的路径)
+  assert.ok(!/[<>]/.test(resolved.restartScript), '默认 restartScript 不许含 < >')
+  assert.ok(!/[<>]/.test(resolved.logFile), '默认 logFile 不许含 < >')
   assert.equal(resolved.psExe, 'pwsh')
   // 启动原语默认必须是"真实那个":桩只能由测试显式传入,resolveConfig 绝不提供默认桩
   // (2026-09-21 事故:restartScript/psExe/启动层都没被覆盖,放行用例真的去起了进程)
@@ -89,12 +99,12 @@ test('buildLauncherCommandLine:headless 首选通道用 conhost --headless 包�
   const line = buildLauncherCommandLine({
     psExe: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
     mode: 'headless',
-    scriptPath: '<工具目录>\\dsh-restart.ps1',
+    scriptPath: DEFAULT_SCRIPT,
     sessionId: 'session-11111111-2222-3333-4444-555555555555',
     waitSeconds: WAIT_SECONDS,
   })
   assert.ok(line.startsWith('conhost.exe --headless "C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -NonInteractive'))
-  assert.ok(line.includes('-ExecutionPolicy Bypass -File "<工具目录>\\dsh-restart.ps1"'))
+  assert.ok(line.includes(`-ExecutionPolicy Bypass -File "${DEFAULT_SCRIPT}"`))
   assert.ok(line.includes('-SessionId "session-11111111-2222-3333-4444-555555555555"'))
   assert.ok(line.endsWith(`-WaitSeconds ${WAIT_SECONDS}`))
 })
@@ -103,7 +113,7 @@ test('buildLauncherCommandLine:hidden 回退通道不依赖 conhost', () => {
   const line = buildLauncherCommandLine({
     psExe: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
     mode: 'hidden',
-    scriptPath: '<工具目录>\\dsh-restart.ps1',
+    scriptPath: DEFAULT_SCRIPT,
     sessionId: 'session-11111111-2222-3333-4444-555555555555',
     waitSeconds: WAIT_SECONDS,
   })
@@ -113,7 +123,7 @@ test('buildLauncherCommandLine:hidden 回退通道不依赖 conhost', () => {
 })
 
 test('buildWmiCreateCommand:命令行作为单引号字面量,内部单引号被翻倍', () => {
-  const command = buildWmiCreateCommand('pwsh -File "<工具目录>\\o\'brien.ps1" -SessionId "s-1"')
+  const command = buildWmiCreateCommand('pwsh -File "C:\\tools\\o\'brien.ps1" -SessionId "s-1"')
   assert.ok(command.includes("$ErrorActionPreference = 'Stop'"))
   assert.ok(command.includes("o''brien.ps1"))
   assert.ok(command.includes('Win32_Process'))
