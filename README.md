@@ -148,8 +148,8 @@
 
 | 位置 | 作用 |
 |---|---|
-| `~/.dsh/profiles/web/plugins/dsh-host-restart/lib/index.js` | 插件本体：注册工具 + 启动时消费标记并注入 |
-| `~/.dsh/profiles/web/plugins/dsh-host-restart/cordis.patch.yml` | 本包自己的注册行 `id: restart-dsh`（**包层 patch**：本包是组合包，由 profile 的 `dsh.profile.bundles` 加载；改它不需要重启，但**不会自己触发重组合**，见 §7 末段） |
+| `~/.dsh/profiles/desktop/plugins/dsh-host-restart/lib/index.js` | 插件本体：注册工具 + 启动时消费标记并注入 |
+| `~/.dsh/profiles/desktop/plugins/dsh-host-restart/cordis.patch.yml` | 本包自己的注册行 `id: restart-dsh`（**包层 patch**：本包是组合包，由 profile 的 `dsh.profile.bundles` 加载；改它不需要重启，但**不会自己触发重组合**，见 §7 末段） |
 | `<工具目录>\dsh-restart.ps1` | 驱动脚本（**随仓库发布**：`driver/dsh-restart.ps1`，见 §16；**默认落点 `<DSH_HOME>\tools\dsh-restart.ps1`**，可用 `restartScript` 覆盖 —— 它不在包的 `files` 清单里，得自己拷到落点）：解析本实例身份 → 只杀本实例 dsh → **探看门狗**（在就换手+触发，不在就自行拉起）→ 等就绪（退出码 4 = 身份确定不了，一个都不杀） |
 | `<工具目录>\dsh-restart.log` | 插件与脚本**共用**的流程日志（**默认落点 `<DSH_HOME>\tools\dsh-restart.log`**，可用 `logFile` 覆盖；超过 1MB 截断保留尾部） |
 | `~/.dsh/storages/dsh-restart/pending.json` | 重启标记；成功注入即删，陈旧/失败改名归档为 `pending.<原因>-<时间>.json` |
@@ -419,12 +419,12 @@ dsh 的 pwsh 工具走 `dsh-subprocess-local`，Windows 上 `detached:false` 且
 | 从别的 profile 实例发起重启，怕误杀生产实例 | 日志里搜 `本实例身份:` 与 `本实例的 dsh 进程(…)`（含判据来源）；解析不出身份会写 `fail closed(退出 4)`，此时**一个进程都没被杀**，把 `-ProfileName`/`-Port` 补进调用参数即可 |
 | 重启后浏览器要 token / 提示未授权 | 本次若走的是"自行拉起"（日志搜 `自行拉起:就绪`），后回归的看门狗没有 token 自动跳转 —— 从 `<工具目录>\dsh-last-url.txt` 取一次 URL 访问，dsh 会签发长效 cookie |
 | 自行拉起失败 | ① `dsh-restart.log` 里每轮的原因（进程已退出 / 无 URL 行 / URL 不带 token / 端口未应答）；② node 自身的报错在 `dsh-selflaunch-err.log`；③ 兜底双击桌面 `dsh-web.bat`（由看门狗拉起） |
-| 卸载时 `pnpm remove` 报 `ERR_PNPM_RESOLUTION_POLICY_VIOLATIONS_UNHANDLED` | 本 profile 的 pnpm 带供应链策略：进 profile 目录（`~\.dsh\profiles\web\`）直接跑 `pnpm remove dsh-host-restart --config.minimum-release-age=0`。`dshpm` 的 `--fast` 只对 `add` 有效 —— `pnpm remove` 不接受 `--minimum-release-age` 这类参数 |
+| 卸载时 `pnpm remove` 报 `ERR_PNPM_RESOLUTION_POLICY_VIOLATIONS_UNHANDLED` | 本 profile 的 pnpm 带供应链策略：进 profile 目录（`~\.dsh\profiles\desktop\`）直接跑 `pnpm remove dsh-host-restart --config.minimum-release-age=0`。`dshpm` 的 `--fast` 只对 `add` 有效 —— `pnpm remove` 不接受 `--minimum-release-age` 这类参数 |
 
 ## 6. 测试与回滚
 
 ```powershell
-cd ~\.dsh\profiles\web\plugins\dsh-host-restart
+cd ~\.dsh\profiles\desktop\plugins\dsh-host-restart
 $env:DSH_RESTART_NO_LAUNCH='1'    # 结构性熔断:不设它就别跑(放行用例会真的起进程)
 node --test "test/*.test.mjs"     # 131 个用例,分布在八个文件:
                                   #   pending(8):标记判定 / 注入文案 / 启动命令行 / 配置校验(纯函数);
@@ -565,7 +565,7 @@ pwsh -File "<工具目录>\dsh-restart.ps1" -SelfLaunchTest -TestDshEntry <假 d
 2. 在 profile 目录下跑 `pnpm remove dsh-host-restart`
    （⚠ 若报 `ERR_PNPM_RESOLUTION_POLICY_VIOLATIONS_UNHANDLED`，
    改跑 `pnpm remove dsh-host-restart --config.minimum-release-age=0`，见 §5）；
-3. 删 `~/.dsh/profiles/web/plugins/dsh-host-restart/`、`<工具目录>\dsh-restart.ps1`，
+3. 删 `~/.dsh/profiles/desktop/plugins/dsh-host-restart/`、`<工具目录>\dsh-restart.ps1`，
    可选删 `<工具目录>\dsh-restart.log` 与 `~/.dsh/storages/dsh-restart/`；
 4. `kill_dsh.bat` 与看门狗保持原样，不受影响。
 
@@ -573,13 +573,13 @@ pwsh -File "<工具目录>\dsh-restart.ps1" -SelfLaunchTest -TestDshEntry <假 d
 
 ```powershell
 # 1) 改源码(唯一真源在 plugins\ 下)
-notepad ~\.dsh\profiles\web\plugins\dsh-host-restart\lib\index.js
+notepad ~\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js
 
 # 2) 跑测试 —— inject 覆盖自检能挡住"宿主起不来"这类改动
-cd ~\.dsh\profiles\web\plugins\dsh-host-restart ; node --test "test/*.test.mjs"
+cd ~\.dsh\profiles\desktop\plugins\dsh-host-restart ; node --test "test/*.test.mjs"
 
 # 3) 同步到真正被加载的那份(直接 add 可能报 Already up to date 而不同步,必须 remove 再 add)
-cd ~\.dsh\profiles\web
+cd ~\.dsh\profiles\desktop
 pnpm remove dsh-host-restart
 pnpm add file:./plugins/dsh-host-restart
 #    ⚠ 这两条只动 node_modules 与 dependencies —— 若 profile 的 package.json 里
@@ -599,8 +599,8 @@ pnpm add file:./plugins/dsh-host-restart
 同步是否真的发生，用 SHA256 对一下两份（`test/` 不进运行副本，测试从源码目录跑）：
 
 ```powershell
-Get-FileHash ~\.dsh\profiles\web\plugins\dsh-host-restart\lib\index.js,
-             ~\.dsh\profiles\web\node_modules\dsh-host-restart\lib\index.js -Algorithm SHA256
+Get-FileHash ~\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js,
+             ~\.dsh\profiles\desktop\node_modules\dsh-host-restart\lib\index.js -Algorithm SHA256
 ```
 
 两个哈希必须一致 —— **拷贝文件改完源码没同步、或没核对哈希，就等于"改了没生效"**（§8 第 3 条踩过一次）。
@@ -609,8 +609,8 @@ Get-FileHash ~\.dsh\profiles\web\plugins\dsh-host-restart\lib\index.js,
 那对本包这种拷贝文件成立（硬链接文件则要原地改写，直接覆盖会断链），依赖规格没变时 lockfile 无需更新：
 
 ```powershell
-Copy-Item ~\.dsh\profiles\web\plugins\dsh-host-restart\lib\index.js `
-          ~\.dsh\profiles\web\node_modules\dsh-host-restart\lib\index.js -Force
+Copy-Item ~\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js `
+          ~\.dsh\profiles\desktop\node_modules\dsh-host-restart\lib\index.js -Force
 # README 等其它改了文件同理;然后照上面核对 SHA256
 ```
 
