@@ -150,7 +150,7 @@
 |---|---|
 | `~/.dsh/profiles/web/plugins/dsh-host-restart/lib/index.js` | 插件本体：注册工具 + 启动时消费标记并注入 |
 | `~/.dsh/profiles/web/plugins/dsh-host-restart/cordis.patch.yml` | 本包自己的注册行 `id: restart-dsh`（**包层 patch**：本包是组合包，由 profile 的 `dsh.profile.bundles` 加载；改它不需要重启，但**不会自己触发重组合**，见 §7 末段） |
-| `<工具目录>\dsh-restart.ps1` | 驱动脚本（**默认落点 `<DSH_HOME>\tools\dsh-restart.ps1`**，可用 `restartScript` 覆盖；脚本本体不随包发布，得自己放到那儿）：解析本实例身份 → 只杀本实例 dsh → **探看门狗**（在就换手+触发，不在就自行拉起）→ 等就绪（退出码 4 = 身份确定不了，一个都不杀） |
+| `<工具目录>\dsh-restart.ps1` | 驱动脚本（**随仓库发布**：`driver/dsh-restart.ps1`，见 §16；**默认落点 `<DSH_HOME>\tools\dsh-restart.ps1`**，可用 `restartScript` 覆盖 —— 它不在包的 `files` 清单里，得自己拷到落点）：解析本实例身份 → 只杀本实例 dsh → **探看门狗**（在就换手+触发，不在就自行拉起）→ 等就绪（退出码 4 = 身份确定不了，一个都不杀） |
 | `<工具目录>\dsh-restart.log` | 插件与脚本**共用**的流程日志（**默认落点 `<DSH_HOME>\tools\dsh-restart.log`**，可用 `logFile` 覆盖；超过 1MB 截断保留尾部） |
 | `~/.dsh/storages/dsh-restart/pending.json` | 重启标记；成功注入即删，陈旧/失败改名归档为 `pending.<原因>-<时间>.json` |
 | `<工具目录>\dsh-selflaunch-out.log` / `dsh-selflaunch-err.log` | 脚本**自行拉起** dsh 时的 stdout/stderr（每轮**覆盖写**，不是追加）。默认与 `-LogFile` 同目录，可用 `-SelfLaunchLogDir` 覆盖 |
@@ -178,7 +178,8 @@ profile 层在包层之后应用，所以覆写优先）。
 
 驱动脚本与日志的**默认落点**是 **DSH home 下的 `tools` 目录**：`<DSH_HOME>\tools\dsh-restart.ps1`
 与 `<DSH_HOME>\tools\dsh-restart.log`（`DSH_HOME` 未设时用 `~\.dsh`，与 `pendingDir` 的算法一致）。
-驱动脚本本体**不随包发布** —— 装到默认落点，或用 `restartScript` / `logFile` 指到你放脚本的地方。
+驱动脚本本体现在**随仓库发布**（`driver/dsh-restart.ps1`，见 §16），但它不在包的 `files` 清单里，
+也不会自动落到默认落点 —— 装到默认落点，或用 `restartScript` / `logFile` 指到你放脚本的地方。
 等待**不是**配置项：`waitSeconds` 自 2026-09-27 起固定为常量 `WAIT_SECONDS = 2`，配置里写它不再生效
 （理由见 §4「为什么等待仍固定成 2s」）。
 
@@ -872,6 +873,52 @@ pwsh -File "<工具目录>\dsh-restart.ps1" -SessionId test -WaitSeconds 0 -Mode
 
 ⚠ 一个值得记住的时序细节：**第一次重启仍然得靠手动或工具**（模块按 URL 缓存，新代码要等新进程才加载）
 —— 那次重启之后 `/restart` 才存在。这不是缺陷，是"用旧代码重启才能加载新代码"的必然。
+
+---
+
+## 16. 驱动脚本（`driver/dsh-restart.ps1`，2026-10-05 起随仓库发布）
+
+**它是什么**：真正干"杀 dsh → 拉起新 dsh → 等新实例就绪"的那一半。插件本体（`lib/index.js`）
+只负责写重启标记、用 WMI 把它启动起来、等新进程回来注入续跑消息；**杀哪一个、怎么起、等多久，
+判定全在脚本里**（为什么必须由 WMI 启动见 §3）。退出码：`0`=新 dsh 已就绪 / `1`=前置失败 /
+`2`=就绪超时或 dsh 没被杀掉 / `3`=已有驱动实例在运行 / `4`=确定不了本实例身份（一个进程都不杀）。
+
+**默认落点**：`<DSH_HOME>\tools\dsh-restart.ps1`（`DSH_HOME` 未设时即 `~\.dsh\tools\dsh-restart.ps1`），
+与插件配置项 `restartScript` 的默认值一致；日志默认在同目录的 `dsh-restart.log`（`logFile` 可覆盖）。
+仓库里这一份放在 `driver/dsh-restart.ps1`，**不在包的 `files` 清单里** ⇒ 不会被自动放到默认落点：
+装的时候自己拷过去，或用 `restartScript` / `logFile` 指到你放脚本的地方。
+
+**前提**：
+
+| 项 | 要求 |
+|---|---|
+| PowerShell | `pwsh`（PowerShell 7）优先，插件失败会回退 `powershell.exe`；脚本本身按 5.1 兼容写（不用 `??`/三元） |
+| WMI | `Win32_Process.Create` 可用 —— 脚本必须由它启动（父进程 `WmiPrvSE.exe`，与 dsh 进程树无关），否则脚本会随 dsh 一起被 `taskkill` 清掉，见 §3 |
+| Node | 自行拉起分支用绝对路径 `C:\Program Files\nodejs\node.exe`（WMI 给的是**服务环境**，裸 `node` 只靠机级 PATH、实测不可靠）；装在别处用 `-NodeExe` 覆盖 |
+| 看门狗 | **可选件，不随本仓库发布**。有它就换手交给它拉起、没有就由脚本自行拉起 —— 两条路都能把重启走完，缺看门狗只是少了"冷启动门户 + 按需接管" |
+
+**参数**（全部有默认值；插件只传身份那几个：`-SessionId` / `-WaitSeconds` / `-Mode` / `-DesktopExe` /
+`-DshPid` / `-ProfileName` / `-Port` / `-PendingFile`）：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `-DshEntry` | `$env:APPDATA` 下的 `npm\node_modules\@deepseek-ai\dsh\lib\bin.js` | 自行拉起时要起哪个 dsh 入口（用环境变量推导，不写死用户名） |
+| `-LogFile` | `<DSH_HOME>\tools\dsh-restart.log` | 流程日志；`-SelfLaunchLogDir` / `-LastUrlFile` 默认跟着它所在目录走 |
+| `-NodeExe` | `node` | 自行拉起用的 node —— 脚本优先用内置绝对路径 `C:\Program Files\nodejs\node.exe`，找不到才回退到本参数（裸 `node` 依赖 WMI 宿主的 PATH，实测不可靠） |
+| `-Mode` | `web` | `web` = node 宿主 + 看门狗/自起；`desktop` = Electron 整树重启（v0.6.0，见 §14） |
+| `-DesktopExe` | 空 | 桌面模式**必填**（插件从 `process.execPath` 传），缺了退出 4 |
+| `-DshPid` / `-ProfileName` / `-Port` / `-PendingFile` | 由插件注入 | "杀哪一个 dsh"的身份判据；三个身份都缺 ⇒ 退出 4，绝不见同名就杀 |
+| `-DoorWaitSeconds` / `-ReadyWaitSeconds` | 25 / 60 | 等看门狗回门户、等新实例就绪的期限 |
+| `-SelfLaunchAttempts` / `-SelfLaunchReadySeconds` / `-SelfLaunchRetryDelaySeconds` | 3 / 12 / 2 | 自行拉起的重试次数、单轮就绪超时、间隔 |
+| `-DesktopLaunchAttempts` / `-DesktopRetryDelaySeconds` / `-DesktopReadySeconds` | 2 / 3 / 60 | 桌面端冷启动的同名三项 |
+| `-DesktopDryRun` / `-SelfLaunchTest` + `-TestDshEntry` | 关 | 演练开关：**只校验身份、不杀任何进程**（见 §6 与 §14.4；自起演练端口限定 39000–39999） |
+
+其余参数（`-KillScript` 已废弃等）见脚本 `param(` 块自带注释。
+
+> ⚠ **它会杀掉当前 dsh 实例并把新实例拉起来 —— 别在非目标环境里随手跑。**
+> 只验证身份判据而不动任何进程，用演练开关：桌面端 `-DesktopDryRun`、web 端
+> `-SelfLaunchTest -TestDshEntry <假 dsh 脚本>`（两者都不杀进程、不启动真实实例）。
+> 脚本还会尽量起回一个看门狗接管新实例：那一步失败只写日志，不影响"重启已完成"的判定。
 
 ---
 
