@@ -187,6 +187,7 @@ function makeHandoff(options = {}) {
   const calls = []
   const result = options.result ?? {
     ok: true,
+    refreshed: true,
     saved: 1,
     failed: 0,
     items: [{ ok: true, sessionId: 'session-self', file: 'C:\\stub\\sl-handoff\\handoff-1.md', stats: { total: 3 } }],
@@ -494,8 +495,21 @@ test('detectRunningSessions:roots() 缺失时退回 list(),子代理会按顶层
   assert.deepEqual(detected.others, [{ id: 'session-other', reasons: ['session'] }])
 })
 
-test('formatInterruptedNotice:点名"会被打断"+原因,最多列 3 个,超出用"等 N 个"', () => {
-  const saved = { ok: true, files: ['C:\\stub\\sl-handoff\\a.md', 'C:\\stub\\sl-handoff\\b.md'], text: 'C:\\stub\\sl-handoff\\a.md' }
+test('formatInterruptedNotice:逐项对照工作表，并区分 job-only / 未列入条目', () => {
+  const saved = {
+    ok: true,
+    refreshed: true,
+    sessionIds: ['session-self', 'session-a', 'session-b', 'child-a', 'child-b'],
+    sessions: [
+      { sessionId: 'session-self' },
+      { sessionId: 'session-a' },
+      { sessionId: 'session-b' },
+      { sessionId: 'child-a', parentSessionId: 'session-self' },
+      { sessionId: 'child-b', parentSessionId: 'session-self' },
+    ],
+    files: ['C:\\stub\\sl-handoff\\active.json'],
+    text: '',
+  }
   const two = formatInterruptedNotice({
     others: [
       { id: 'session-a', reasons: ['subagent'] },
@@ -506,12 +520,11 @@ test('formatInterruptedNotice:点名"会被打断"+原因,最多列 3 个,超出
   assert.match(two, /本次重启会打断 2 个其它会话/)
   assert.ok(two.includes('`session-a`(子代理在跑)'), two)
   assert.ok(two.includes('`session-b`(会话在跑、后台作业在跑)'), two)
-  assert.ok(!two.includes('等 2 个'))
-  assert.ok(two.includes('会被一起硬杀'), '要说清后果:它们会被一起硬杀')
-  assert.ok(two.includes('正在跑的那一步工具调用直接丢'), '代价不许说轻:交接救得回上下文、救不回这一步')
-  assert.ok(two.includes('这些会话的交接记录已随本次重启存下(本次共 2 份,含本会话)'), two)
-  assert.ok(two.includes('新进程启动时会由 dsh-host-sl 逐条注入、各自重起一轮接着跑'), two)
-  assert.ok(!two.includes('本会话自己名下'), '没有自己名下的活就不该写那半句')
+  assert.ok(two.includes('会被一起硬杀'), two)
+  assert.ok(two.includes('正在跑的那一步工具调用直接丢'), two)
+  assert.ok(two.includes('被打断的其它会话中 2/2 个已列入工作表'), two)
+  assert.ok(two.includes('后台作业本身不会恢复'), two)
+  assert.ok(!two.includes('本会话自己名下'), two)
 
   const five = formatInterruptedNotice({
     others: ['s-1', 's-2', 's-3', 's-4', 's-5'].map((id) => ({ id, reasons: ['session'] })),
@@ -520,40 +533,39 @@ test('formatInterruptedNotice:点名"会被打断"+原因,最多列 3 个,超出
   assert.equal(MAX_LISTED_SESSIONS, 3)
   assert.match(five, /本次重启会打断 5 个其它会话/)
   assert.ok(five.includes('`s-3`'))
-  assert.ok(!five.includes('`s-4`'), '第 4 个 id 不该被列出')
+  assert.ok(!five.includes('`s-4`'))
   assert.ok(five.includes('等 5 个'))
-})
+  assert.ok(five.includes('5 个未列入工作表'))
 
-test('formatInterruptedNotice:本会话自己的子代理/作业、没在飞的活、交接没存下,三种情形各说各话', () => {
-  const saved = { ok: true, files: ['C:\\stub\\sl-handoff\\a.md'], text: '' }
-  const failed = { ok: false, files: [], text: 'slHandoff 服务不可用(dsh-host-sl 未装载?)' }
-  const noOthers = { others: [], own: { subagents: 0, jobs: 0 } }
-
-  // ① 只有本会话自己名下的活:说"随本会话一起被硬杀",不冒称"其它会话"
-  const own = formatInterruptedNotice({ others: [], own: { subagents: 2, jobs: 1 } }, saved)
-  assert.ok(own.includes('本会话自己名下还有 2 个子代理在跑、1 个后台作业未结算'), own)
-  assert.ok(own.includes('它们随本会话一起被硬杀'), own)
-  assert.ok(!own.includes('其它会话'), own)
-  // ② 两种情形同时存在:合成一段,交接结论只说一次(不重复那半句)
-  const both = formatInterruptedNotice({
-    others: [{ id: 'session-a', reasons: ['session'] }],
-    own: { subagents: 1, jobs: 0 },
+  const own = formatInterruptedNotice({
+    others: [], own: { subagents: 2, jobs: 1 }, selfSessionId: 'session-self',
   }, saved)
-  assert.ok(both.includes('本次重启会打断 1 个其它会话(`session-a`(会话在跑))、本会话自己名下还有 1 个子代理在跑'), both)
-  assert.equal(both.split('这些会话的交接记录').length - 1, 1, '交接结论只该出现一次')
-  // ③ 什么都没在飞:整段省略(调用方不该拿到半句话)
-  assert.equal(formatInterruptedNotice(noOthers, saved), '')
-  // ④ 交接没存下:不许说"已存",也不许承诺会注入回去
-  const notSaved = formatInterruptedNotice({ others: [{ id: 'session-a', reasons: ['session'] }], own: { subagents: 0, jobs: 0 } }, failed)
-  assert.ok(notSaved.includes('这些会话的交接记录这次没存下来(slHandoff 服务不可用(dsh-host-sl 未装载?))'), notSaved)
-  assert.ok(notSaved.includes('新进程里没人会把它们唤回'), notSaved)
-  assert.ok(!notSaved.includes('已随本次重启存下'), '没存下就不许说存下了')
-  assert.ok(!notSaved.includes('逐条注入'), '没存下就不许承诺"会被注入回去"')
-  // ⑤ 服务没回传记录路径:如实说,不编一个
-  const noPath = formatInterruptedNotice({ others: [{ id: 'session-a', reasons: ['session'] }], own: { subagents: 0, jobs: 0 } }, { ok: true, files: [], text: '' })
-  assert.ok(noPath.includes('服务未回传记录路径'), noPath)
-})
+  assert.ok(own.includes('本会话自己名下还有 2 个子代理在跑、1 个后台作业未结算'), own)
+  assert.ok(own.includes('本会话名下子代理有 2/2 个列入工作表'), own)
+  assert.ok(own.includes('后台作业本身不会恢复'), own)
+  assert.ok(!own.includes('其它会话'), own)
 
+  const jobOnly = formatInterruptedNotice({
+    others: [{ id: 'job-only', reasons: ['job'] }], own: { subagents: 0, jobs: 0 },
+  }, { ...saved, sessions: [{ sessionId: 'session-self' }], sessionIds: ['session-self'] })
+  assert.ok(jobOnly.includes('1 个仅因后台作业被检测到'), jobOnly)
+  assert.ok(jobOnly.includes('不符合 turn / subagent 接续条件'), jobOnly)
+  assert.ok(jobOnly.includes('不会由 SL 自动唤醒'), jobOnly)
+
+  assert.equal(formatInterruptedNotice({ others: [], own: { subagents: 0, jobs: 0 } }, saved), '')
+  const failed = { ok: false, files: [], sessions: [], sessionIds: [], text: 'slHandoff 服务不可用(dsh-host-sl 未装载?)' }
+  const notSaved = formatInterruptedNotice({
+    others: [{ id: 'session-a', reasons: ['session'] }], own: { subagents: 0, jobs: 0 },
+  }, failed)
+  assert.ok(notSaved.includes('SL 工作表未能确认写入(slHandoff 服务不可用'), notSaved)
+  assert.ok(notSaved.includes('其它会话不会由 SL 保证唤回'), notSaved)
+  assert.ok(!notSaved.includes('已完成刷新'), notSaved)
+
+  const empty = formatInterruptedNotice({
+    others: [{ id: 'session-a', reasons: ['session'] }], own: { subagents: 0, jobs: 0 },
+  }, { ok: true, files: [], sessions: [], sessionIds: [], refreshed: true, text: '' })
+  assert.ok(empty.includes('1 个未列入工作表'), empty)
+})
 // ── 工具层:检测只告知、不拦截(2026-09-28 起)────────────────────────────────
 
 test('其它顶层会话 running ⇒ 照常重启,文案里点名会被打断的会话(不再拒绝)', async () => {
@@ -572,7 +584,7 @@ test('其它顶层会话 running ⇒ 照常重启,文案里点名会被打断的
   assert.ok(result.message.includes('本次重启会打断 1 个其它会话'), result.message)
   assert.ok(result.message.includes('`session-other-a`(会话在跑)'), '告知文案要给出会话 id 与原因')
   assert.ok(result.message.includes('会被一起硬杀'), result.message)
-  assert.ok(result.message.includes('这些会话的交接记录已随本次重启存下'), result.message)
+  assert.ok(result.message.includes('1 个未列入工作表'), result.message)
   assert.ok(!result.message.includes('未执行'), '2026-09-28 起不再有"未执行"这条路径')
   assert.equal('launcherPid' in result, true, '照常返回启动结果')
   assert.match(lastGateLog(), /会话检测: 顶层会话 2 个\(本轮运行 2 个\), 其它有活在跑 1 个: session-other-a\(session\)/)
@@ -667,7 +679,7 @@ test('agents 服务缺失 ⇒ 不抛错、记 warn、照常重启(走到启动�
   assert.ok(!/其它会话/.test(scene.result.message), '检测不到时不该点名任何会话')
   assert.ok(scene.result.message.includes('本次没能读到宿主会话表(agents 服务不可用)'), scene.result.message)
   assert.ok(scene.result.message.includes('无法提前说明会打断哪些会话'), scene.result.message)
-  assert.match(readFileSync(testLog, 'utf8'), /无法检测其它会话\(agents 服务不可用\),按无其它会话处理,照常重启/)
+  assert.match(readFileSync(testLog, 'utf8'), /无法检测其它会话\(agents 服务不可用\),无法确认其它会话状态,照常重启/)
 })
 
 test('agents 服务存在但没有 roots()/list() ⇒ 同样 fail-soft 放行并记原因', async () => {
@@ -715,9 +727,9 @@ test('未注入桩时由 DSH_RESTART_NO_LAUNCH=1 熔断兜底:连 execFile 都�
   assert.equal(existsSync(pendingFile), false, '熔断后必须撤销标记')
 })
 
-// ── 重启前的交接保存(slHandoff 服务,2026-09-28 新增)─────────────────────────
+// ── 重启前的工作表保存(slHandoff 服务)──────────────────────────────────────
 
-test('重启前会调用 slHandoff.saveAll 保存**所有活跃会话**:结果(含记录文件路径)写进返回文案', async () => {
+test('重启前等待 slHandoff.saveAll 提交工作表:报告实际条目和记录路径', async () => {
   const handoff = makeHandoff()
   const scene = await callTool(
     { agents: { roots: () => [topAgent('session-self', 'running')] }, [HANDOFF_SERVICE]: handoff.service },
@@ -736,16 +748,17 @@ test('重启前会调用 slHandoff.saveAll 保存**所有活跃会话**:结果(�
     '标记里必须是固定文案,调用方传的 note 一个字都不许拼进去')
   assert.equal(scene.result.handoff.ok, true)
   assert.deepEqual(scene.result.handoff.files, ['C:\\stub\\sl-handoff\\handoff-1.md'])
-  assert.ok(scene.result.message.includes('重启前已保存会话交接记录'), scene.result.message)
+  assert.ok(scene.result.message.includes('重启前 dsh-host-sl(SL) 工作表已完成刷新并提交'), scene.result.message)
   assert.ok(scene.result.message.includes('C:\\stub\\sl-handoff\\handoff-1.md'), '文案里要能看见记录文件路径')
-  assert.ok(scene.result.message.includes('dsh-host-sl'), '文案要说清是谁会在新进程里注入它')
-  assert.match(readFileSync(testLog, 'utf8'), /重启前已保存会话交接记录\(1 个会话\):/)
+  assert.ok(scene.result.message.includes('dsh-host-sl(SL) 工作表'), '需点明提供工作表的服务')
+  assert.match(readFileSync(testLog, 'utf8'), /重启前工作表已提交:1 个可恢复会话,完整刷新:/)
 })
 
 test('多个会话都被存下时,文案与日志里列出全部记录文件路径', async () => {
   const handoff = makeHandoff({
     result: {
       ok: true,
+      refreshed: true,
       saved: 3,
       failed: 0,
       items: [
@@ -767,7 +780,7 @@ test('多个会话都被存下时,文案与日志里列出全部记录文件路�
     'C:\\stub\\sl-handoff\\handoff-sub.md',
   ], '三个会话的记录路径都要带出来(用户据此核对"都存上了")')
   assert.ok(scene.result.message.includes('handoff-sub.md'))
-  assert.match(readFileSync(testLog, 'utf8'), /重启前已保存会话交接记录\(3 个会话\):/)
+  assert.match(readFileSync(testLog, 'utf8'), /重启前工作表已提交:3 个可恢复会话,完整刷新:/)
 })
 
 test('服务是异步实现时也要 await 到落盘(保存没回来就不许往下走)', async () => {
@@ -790,10 +803,10 @@ test('服务返回 ok:false ⇒ 重启照常(桩调用一次、标记照写),文
   )
   assertAllowPath(scene)
   assert.equal(scene.result.handoff.ok, false)
-  assert.ok(scene.result.message.includes('重启前的会话交接未保存'), scene.result.message)
+  assert.ok(scene.result.message.includes('重启前未能确认 SL 工作表写入'), scene.result.message)
   assert.ok(scene.result.message.includes('读会话历史失败(桩)'), '服务给的原因要如实带出来')
   assert.ok(scene.result.message.includes('不影响本次重启'))
-  assert.match(readFileSync(testLog, 'utf8'), /重启前的交接保存未成功:读会话历史失败\(桩\);照常重启/)
+  assert.match(readFileSync(testLog, 'utf8'), /重启前工作表未成功提交:读会话历史失败\(桩\);照常重启/)
 })
 
 test('服务抛错 ⇒ 重启照常,只记一行日志,文案说明未保存', async () => {
@@ -804,9 +817,9 @@ test('服务抛错 ⇒ 重启照常,只记一行日志,文案说明未保存', a
   assertAllowPath(scene)
   assert.equal(handoff.calls.length, 1, '抛错也要先被调用一次')
   assert.equal(scene.result.handoff.ok, false)
-  assert.ok(scene.result.message.includes('重启前的会话交接未保存'), scene.result.message)
+  assert.ok(scene.result.message.includes('重启前未能确认 SL 工作表写入'), scene.result.message)
   assert.ok(scene.result.message.includes('桩:交接保存炸了'))
-  assert.match(readFileSync(testLog, 'utf8'), /调用 slHandoff\.saveAll\(\) 抛错,跳过重启前的交接保存,照常重启:桩:交接保存炸了/)
+  assert.match(readFileSync(testLog, 'utf8'), /调用 slHandoff\.saveAll\(\) 抛错\(桩:交接保存炸了\),跳过重启前的工作表保存,照常重启/)
 })
 
 test('服务不存在(dsh-host-sl 未装载)⇒ 重启照常,文案说明服务不可用', async () => {
@@ -814,9 +827,9 @@ test('服务不存在(dsh-host-sl 未装载)⇒ 重启照常,文案说明服务�
   assertAllowPath(scene)
   assert.equal(scene.result.handoff.ok, false)
   assert.deepEqual(scene.result.handoff.files, [])
-  assert.ok(scene.result.message.includes('重启前的会话交接未保存'), scene.result.message)
+  assert.ok(scene.result.message.includes('重启前未能确认 SL 工作表写入'), scene.result.message)
   assert.ok(scene.result.message.includes('slHandoff 服务不可用'), scene.result.message)
-  assert.match(readFileSync(testLog, 'utf8'), /未找到 slHandoff 服务\(dsh-host-sl 未装载\?\),跳过重启前的交接保存,照常重启/)
+  assert.match(readFileSync(testLog, 'utf8'), /未找到 slHandoff 服务,跳过重启前的工作表保存,照常重启/)
 })
 
 test('服务形态不符(saveAll 不是函数 / 读 saveAll 就抛)⇒ 重启照常', async () => {
@@ -828,7 +841,7 @@ test('服务形态不符(saveAll 不是函数 / 读 saveAll 就抛)⇒ 重启照
   assert.equal(wrongShape.result.handoff.ok, false)
   assert.ok(wrongShape.result.message.includes('不是函数'), wrongShape.result.message)
   assert.ok(wrongShape.result.message.includes('v0.4.0+'), '文案要说清"需要哪个版本的服务"')
-  assert.match(readFileSync(testLog, 'utf8'), /slHandoff 服务没有 saveAll\(\)\(接口形态不符,dsh-host-sl 需要 v0\.4\.0\+\),跳过重启前的交接保存,照常重启/)
+  assert.match(readFileSync(testLog, 'utf8'), /slHandoff\.saveAll 不是函数\(接口形态不符,需要 dsh-host-sl v0\.4\.0\+\),跳过重启前的工作表保存,照常重启/)
 
   // 取 saveAll 属性本身就抛(代理/getter):同样只该记一行日志
   const throwingGetter = {}
@@ -851,7 +864,7 @@ test('重启失败(通道全挂)时交接结果也如实写进文案:交接可�
   assert.equal(scene.result.ok, false)
   assert.equal(handoff.calls.length, 1, '交接排在启动之前,所以这时它已经存过了')
   assert.equal(scene.result.handoff.ok, true)
-  assert.ok(scene.result.message.includes('重启前已保存会话交接记录'), scene.result.message)
+  assert.ok(scene.result.message.includes('重启前 dsh-host-sl(SL) 工作表已完成刷新并提交'), scene.result.message)
   assert.ok(scene.result.message.includes('C:\\stub\\sl-handoff\\handoff-1.md'), '失败路径也要给出记录文件路径')
 })
 
@@ -862,10 +875,10 @@ test('其它会话在飞 + 交接服务缺席 ⇒ 重启照常,文案如实说"�
   assertAllowPath(scene)
   const { message } = scene.result
   assert.ok(message.includes('本次重启会打断 1 个其它会话(`session-other`(会话在跑))'), message)
-  assert.ok(message.includes('这些会话的交接记录这次没存下来(slHandoff 服务不可用(dsh-host-sl 未装载?))'), message)
-  assert.ok(message.includes('新进程里没人会把它们唤回'), message)
-  assert.ok(!message.includes('重启前已保存会话交接记录'), '没保存成功就不许出现"已保存"')
-  assert.ok(!message.includes('逐条注入'), '没保存成功就不许承诺"会被注入回去"')
+  assert.ok(message.includes('SL 工作表未能确认写入(slHandoff 服务不可用(dsh-host-sl 未装载?))'), message)
+  assert.ok(message.includes('其它会话不会由 SL 保证唤回'), message)
+  assert.ok(!message.includes('重启前工作表已提交'), '没保存成功就不许出现"已保存"')
+  assert.ok(!message.includes('由 SL 自动唤醒'), '没保存成功就不许承诺"会被注入回去"')
 })
 
 test('saveHandoffBeforeRestart 单测:ctx.get 抛错 / 服务缺席 / 服务返回 undefined 都 fail-soft', async () => {
@@ -896,7 +909,19 @@ test('saveHandoffBeforeRestart 单测:ctx.get 抛错 / 服务缺席 / 服务返�
   assert.equal(lines.length, 1)
 })
 
-// ── 原有边界(2026-09-28 后只剩这两条会拒绝)─────────────────────────────────
+test('saveAll 永不返回时在给定时限内 fail-soft 并继续重启', async () => {
+  const lines = []
+  const result = await saveHandoffBeforeRestart(
+    { get: () => ({ saveAll: () => new Promise(() => {}) }) },
+    { id: 'session-self' },
+    (message) => lines.push(message),
+    5,
+  )
+  assert.equal(result.ok, false)
+  assert.match(result.text, /超过 5ms/)
+  assert.equal(lines.length, 1)
+})
++// ── 原有边界(2026-09-28 后只剩这两条会拒绝)─────────────────────────────────
 
 test('拿不到归属会话 / 子代理发起 ⇒ 仍在检测与交接保存之前就拒绝(原有边界不变)', async () => {
   const orphanHandoff = makeHandoff()

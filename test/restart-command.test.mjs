@@ -366,5 +366,5 @@ test('卸载时命令 disposer 与工具 disposer 一起被回收(清理只登�
 })
 
 test(`版本行回显 v${VERSION}(排障时用它确认"新版本已生效")`, () => {
-  assert.equal(VERSION, '0.7.0')
+  assert.equal(VERSION, '0.8.0')
 })

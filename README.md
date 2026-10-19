@@ -6,6 +6,12 @@
 用途：改完宿主插件代码或 cordis patch 后常常要重启 dsh 才生效，而重启会掐断正在进行的会话。
 本插件把「重启」和「把会话接回来」合成一步，用户不用刷新页面、不用重新描述上下文。
 
+> **2026-10-12（描述瘦身，版本号未变）**：`restart_dsh` 的模型侧描述由 2,920 字符压到约 934 字符，只留
+> 「能做什么 + 关键约束」（注入一条固定续接消息、约 20–40 秒、本轮回复到此为止、只杀本实例、
+> 在飞子代理与后台作业会被硬杀且结果丢失、job-only 会话不会自动恢复、仅当用户明确要求时用）。
+> 被移出的机制细节（写标记与驱动脚本的 2 秒宽限、`slHandoff.saveAll` 最多等 7 秒、兜底注入约 10 秒、
+> 桌面端整树语义等）以本 README §1 / §4 / §14 / §15 为准。行为一个字没改：131/131 全绿。
+> **v0.8.0（2026-10-10）**：修正重启前 SL 工作表契约；等待刷新提交结果、显示实际会话 ID 和刷新完整度，并明确 job-only 会话不会由 SL 恢复。`restart_dsh` 与 `/restart` 的工具说明同步更新；最多等待 7 秒，服务失败仍不阻断重启。
 > **v0.7.0（2026-10-03，用户要求）**：**新增人工指令 `/restart`** —— 此前重启只有模型工具一个入口，
 > 人想重启得先说服模型去调它。现在同一套流程多了一条**人能直接敲**的入口（输入框里 `/restart`），
 > 行为与工具**完全一致**：同样写标记、同样起驱动脚本、重启后同样注入固定文案「dsh已重启,继续」，
@@ -24,7 +30,7 @@
 > 桌面端只有一种可行语义：**整树重启**（Host 一死，Electron 主进程会走"崩溃恢复"弹原生对话框，
 > 那条路要人点，不能当自动化用）。身份判据从 **profile/端口** 改成 **pid + exe 路径**，拉起方式从
 > **看门狗换手** 改成 **杀掉整棵同 exe 进程树 + 冷启动应用**；**只杀同一安装路径的应用**（用户 2026-09-30
-> 选定）。判据、实测进程树、演练开关与验收判据见 §14。用例 99 → **115**（新增 `test/desktop-mode.test.mjs`，16 个用例）。
+> 选定）。判据、实测进程树、演练开关与验收判据见 §14。用例 99 → **114**（新增 `test/desktop-mode.test.mjs`）。
 > ⚠ 模块按 URL 缓存 ⇒ **要等下一次应用重启才生效**。
 > **v0.5.0（2026-09-29，用户拍板）**：**工具不再有任何参数、注入文案固定**。
 > 删掉 `restart_dsh` 唯一的参数 `note`（删参数属破坏性变更，故升 minor），工具描述里关于 note 的
@@ -62,10 +68,10 @@
 > **v0.3.0（2026-09-28）**：发起重启前会先调**可选服务** `slHandoff`（由同 profile 的
 > `dsh-host-sl` 提供）存一份会话交接记录 —— 保存结果写进工具返回文案；服务缺席/抛错**绝不阻断重启**。
 > 语义、顺序与实测耗时见 §4「重启前的交接保存」。
-> **2026-09-28 晚（覆盖所有活跃会话）**：调用面从 `save(当前会话)` 换成
-> **`saveAll({all:true, noteSessionId, session})`**（v0.5.0 起不再传 `note`）—— `dsh-host-sl` 会枚举
-> 宿主里**所有活着的 agent**（顶层会话 + 子代理）各存一份交接记录。
-> 本插件仍然只复活发起重启的那个会话，其余会话/子代理的续跑**完全靠这份交接**（见 §4）。
+> **历史：2026-09-28 晚改用 `saveAll`**：调用面从 `save(当前会话)` 换成
+> `saveAll({all:true, noteSessionId, session})`（v0.5.0 起不再传 `note`）。当时服务会枚举 live agent；
+> 此处只记录 API 沿革，不代表当前所有活动类型都会进入可恢复工作表。本插件只续接发起会话；其它会话
+> 只有符合 turn / subagent 判据且确实写入工作表时，才由 SL 尝试唤醒（见 §4）。
 
 ---
 
@@ -91,10 +97,10 @@
    ├─⓪ 检测:其它会话还有活在跑 ⇒ **只告知、不拦截**(v0.4.0,2026-09-28)——
    │      口径三条:自己在本轮运行 / 名下子代理在跑 / 名下后台作业未结算(见 §4);
    │      结果写进日志与工具返回文案(点名会话 id + 原因 + 交接存没存下),然后**照常往下走**
-   ├─⓪.5 **重启前保存交接**(可选服务 slHandoff,由 dsh-host-sl 提供):
-   │      `saveAll({all:true, noteSessionId, session})` ⇒ **所有活跃会话**(顶层+子代理)各一份记录;
-   │      await 到保存完成 → 结果(成功+全部记录文件路径 / 失败+原因)进工具返回文案;
-   │      服务缺席、形态不符、调用抛错 ⇒ 只写一行日志,**照常往下走**(见 §4)
+   ├─⓪.5 **重启前刷新 SL 工作表**(可选服务 slHandoff,由 dsh-host-sl 提供):
+   │      `saveAll({all:true, noteSessionId, session})` ⇒ 等待最终表并报告实际会话 ID / refreshed;
+   │      服务最多刷新 5s，本插件最多等待 7s；job-only 不入表、不承诺恢复;
+   │      服务缺席、失败或超时 ⇒ 只写一行日志,**照常往下走**(见 §4)
    ├─① 插件写标记 $DSH_HOME/storages/dsh-restart/pending.json
    │      { sessionId, text:"dsh已重启,继续", createdAt, waitSeconds, pidBefore }
    ├─② 插件用 WMI(Win32_Process.Create) 启动驱动脚本 —— 脱离 dsh 进程树,
@@ -146,12 +152,14 @@
 
 ## 2. 文件与配置
 
+下面写的 `<工具目录>` 指**驱动脚本与日志所在的目录**：默认是 `<DSH_HOME>\tools`（`DSH_HOME` 未设时用 `~\.dsh`），可用配置项 `restartScript` / `logFile` 覆盖。
+
 | 位置 | 作用 |
 |---|---|
 | `~/.dsh/profiles/desktop/plugins/dsh-host-restart/lib/index.js` | 插件本体：注册工具 + 启动时消费标记并注入 |
 | `~/.dsh/profiles/desktop/plugins/dsh-host-restart/cordis.patch.yml` | 本包自己的注册行 `id: restart-dsh`（**包层 patch**：本包是组合包，由 profile 的 `dsh.profile.bundles` 加载；改它不需要重启，但**不会自己触发重组合**，见 §7 末段） |
-| `<工具目录>\dsh-restart.ps1` | 驱动脚本（**随仓库发布**：`driver/dsh-restart.ps1`，见 §16；**默认落点 `<DSH_HOME>\tools\dsh-restart.ps1`**，可用 `restartScript` 覆盖 —— 它不在包的 `files` 清单里，得自己拷到落点）：解析本实例身份 → 只杀本实例 dsh → **探看门狗**（在就换手+触发，不在就自行拉起）→ 等就绪（退出码 4 = 身份确定不了，一个都不杀） |
-| `<工具目录>\dsh-restart.log` | 插件与脚本**共用**的流程日志（**默认落点 `<DSH_HOME>\tools\dsh-restart.log`**，可用 `logFile` 覆盖；超过 1MB 截断保留尾部） |
+| `<工具目录>\dsh-restart.ps1` | 驱动脚本：解析本实例身份 → 只杀本实例 dsh → **探看门狗**（在就换手+触发，不在就自行拉起）→ 等就绪（退出码 4 = 身份确定不了，一个都不杀） |
+| `<工具目录>\dsh-restart.log` | 插件与脚本**共用**的流程日志（超过 1MB 截断保留尾部） |
 | `~/.dsh/storages/dsh-restart/pending.json` | 重启标记；成功注入即删，陈旧/失败改名归档为 `pending.<原因>-<时间>.json` |
 | `<工具目录>\dsh-selflaunch-out.log` / `dsh-selflaunch-err.log` | 脚本**自行拉起** dsh 时的 stdout/stderr（每轮**覆盖写**，不是追加）。默认与 `-LogFile` 同目录，可用 `-SelfLaunchLogDir` 覆盖 |
 | `<工具目录>\dsh-last-url.txt` | 最近一次自起 dsh 的**带 token 完整 URL**（覆盖写、只保留最近一次）。用途：清 cookie / 换浏览器时取一次；重启日志里只记"已取得带 token 的 URL"，不留 token 明文 |
@@ -175,11 +183,6 @@ profile 层在包层之后应用，所以覆写优先）。
 与 `dsh-host-sl` 的默认落点一致；**只读**，测试把它指到临时目录）/
 `deferRecheckMs`（v0.4.2：让位之后的兜底复查延迟，默认 `10000`）。
 非法值会 fail loud（抛错、不注册工具）。
-
-驱动脚本与日志的**默认落点**是 **DSH home 下的 `tools` 目录**：`<DSH_HOME>\tools\dsh-restart.ps1`
-与 `<DSH_HOME>\tools\dsh-restart.log`（`DSH_HOME` 未设时用 `~\.dsh`，与 `pendingDir` 的算法一致）。
-驱动脚本本体现在**随仓库发布**（`driver/dsh-restart.ps1`，见 §16），但它不在包的 `files` 清单里，
-也不会自动落到默认落点 —— 装到默认落点，或用 `restartScript` / `logFile` 指到你放脚本的地方。
 等待**不是**配置项：`waitSeconds` 自 2026-09-27 起固定为常量 `WAIT_SECONDS = 2`，配置里写它不再生效
 （理由见 §4「为什么等待仍固定成 2s」）。
 
@@ -249,97 +252,34 @@ dsh 的 pwsh 工具走 `dsh-subprocess-local`，Windows 上 `detached:false` 且
   旧版把等待交给模型（`wait_seconds` 2~60s，默认 6）只会让被打断的活更多。
   现在只留"本次工具结果落盘"必需的 2s，工具参数与配置项一并删除。
 
-### 其它会话在飞：只告知，不拦截（v0.4.0，2026-09-28）
+### 其它会话在飞：只告知，不拦截（v0.4.0 起；恢复口径 v0.8.0）
 
-- **不再拒绝**：v0.3.0 及以前，检测到别的会话还有活在跑就直接 `return {ok:false}`（一个字节都不写盘、
-  不启动任何进程）。用户 2026-09-28 明确要求「重启不应该被拒绝」，那层闸门已删除：检测照旧跑，
-  结果只进日志与工具返回文案，然后**照常写标记、照常起驱动脚本**。
-- **为什么删**：闸门挡住的正是"用户自己按下的重启"—— 改完插件/配置要生效就得重启，而闸门把决定权从
-  用户手里拿走，只给"等它们跑完"这一条出路；`slHandoff` 的交接记录已经能把被打断的会话接回来，
-  闸门的边际价值不足以继续拦人。
-- **代价（不许说轻）**：重启照样硬杀别人的回合。交接记录救得回**上下文**，救不回**被打断的那一步工具
-  调用** —— 冷恢复是带着记录**重起一轮**，不是从断点续跑。工具返回文案里逐字写着这句，别改成"无损恢复"。
-- **文案说什么**：`本次重启会打断 N 个其它会话(\`id\`(会话在跑)、…)` + 各自原因 +
-  `本会话自己名下还有 N 个子代理在跑`（有才写）+ 交接记录的结局（存下了/没存下+原因）。原文示例：
+- **重启不因活跃会话而拒绝**：检测结果用于告知，不阻断写标记和启动驱动脚本。
+- **检测与恢复是两套口径**：重启插件会列出本轮、名下子代理和未结算作业；dsh-host-sl 工作表只接续符合 `turn / subagent` 条件的会话。后台作业会被硬杀、结果丢失；仅因作业被检测到的会话不会自动恢复。
+- **逐项核对，不承诺全体恢复**：重启前等待 `slHandoff.saveAll()` 返回已提交的会话 ID，再与被打断名单比对。文案区分已列入、未列入和刷新不完整；子代理按 `parentSessionId` 归属。本插件自己的固定续接消息只恢复发起会话。
+- **刷新状态如实报告**：`refreshed:true` 表示 live 会话枚举与 turn / subagent 重算完成；`false` 表示只提交最近已知状态；旧版服务未提供该字段时标为未知。工作表的写盘成功不等于刷新完整。
 
   ```
-  重启已发起:…整轮约 20~40 秒。重启前已保存会话交接记录:C:\…\handoff-session-self.md、…(新进程启动时
-  会由 dsh-host-sl 注入回本会话)。本次重启会打断 2 个其它会话(`session-other-a`(会话在跑)、
-  `session-other-b`(后台作业在跑))、本会话自己名下还有 1 个子代理在跑:它们与本会话共用同一个 dsh 宿主,
-  会被一起硬杀 —— 正在跑的那一步工具调用直接丢(交接记录救得回上下文、救不回这一步);这些会话的交接记录
-  已随本次重启存下(本次共 3 份,含本会话),新进程启动时会由 dsh-host-sl 逐条注入、各自重起一轮接着跑。
-  请立刻结束本轮回复,…
+  重启前 dsh-host-sl(SL) 工作表已完成刷新并提交，含 2 个会话条目(...);
+  本次重启会打断 2 个其它会话(`session-other-a`(会话在跑)、`session-job`(后台作业在跑))、
+  本会话自己名下还有 1 个子代理在跑:它们与本会话共用同一个 dsh 宿主，会被一起硬杀；
+  正在跑的那一步工具调用直接丢。被打断的其它会话中 1/2 个已列入工作表，SL 会尝试唤醒；
+  1 个未列入工作表，重启后不会由 SL 自动唤醒，其中 1 个仅因后台作业被检测到；
+  本会话名下子代理有 1/1 个列入工作表，后台作业本身不会恢复、未结算结果会丢失。
   ```
 
-  交接没存下时后半句换成 `这些会话的交接记录这次没存下来(<原因>),新进程里没人会把它们唤回 ——
-  那些会话的上下文需要你重新交代。`；没有任何活在飞时整段省略；检测不到时写
-  `本次没能读到宿主会话表(<原因>),无法提前说明会打断哪些会话;若此刻还有别的会话或子代理在跑,
-  它们会一起被硬杀。`（**不假装"没有别的会话"**）。
-- **检测口径三条**（2026-09-27 扩）：① 会话自己在本轮运行（`status === 'running'` —— 含"等审批/等回答"，
-  那种轮次仍然是 running）；② 名下还有正在跑的子代理（顶层会话派完后**台**子代理就结束本轮 ⇒
-  父会话 idle、子代理还在跑；`roots()` 看不见子代理，靠 `session.header.parentSession` 上溯归到它的根）；
-  ③ 名下还有未结算的后台作业（`running`/`stopping`；作业记录是纯内存态，硬杀即永久丢失）。
-  为什么正是这三条：DSH 自己的"会话还有活动"口径（归档准入）就是这三样。
-- **发起者自己名下的子代理/作业不算"其它会话"**：它们与本会话同进程共命，单独计进 `detectRunningSessions`
-  返回值的 `own` 并写进文案（`本会话自己名下还有 N 个子代理在跑`）—— 它们同样被硬杀，只是重启后由
-  `dsh-host-sl` 按"先顶层、后子代理"逐条唤回，而本会话由本插件唤醒。
-- **检测的可见范围**：只看**本进程**的会话注册表与作业表（`ctx.get('agents')` / `ctx.get('jobs')`）——
-  另一个 dsh 进程（另一个 profile、试跑实例）里的会话它看不见，也就不会出现在文案里。
-- **标签页开着但空闲、名下无子代理无作业** ⇒ 不算"在飞的活"：文案里不会出现它，重启时它照样被杀。
-- **判定到杀之间仍有约 3~5 秒窗口**（静默 2s + 驱动脚本启动与身份解析）：这段里新开始的活不会被写进文案，
-  也没有第二次检查。本轮明确不做"等待期复检 + 取消旗标"，属已知残留（重复调用顶掉标记同属此列）。
-- **服务读不到 = 照常重启，但不许假装没事**：`agents`（或 `jobs`）拿不到、接口形态不符、枚举抛错时，
-  日志留一行 `无法检测其它会话(...),按无其它会话处理,照常重启`，文案写"本次没能读到宿主会话表(...)"。
-  ⇒ 上游接口一旦漂移，这条检测会**静默失效**（重启照旧成功，只是说不清会打断谁），唯一线索就是那行 warn。
+- **检测口径**：① 顶层会话 `status === 'running'`；② 名下任意深度子代理在跑；③ 名下作业为 `running` / `stopping`。发起者名下的子代理与作业单独计入 `own`，不算其它会话。
+- **可见范围**：只看本进程的 `agents` / `jobs` 服务；其它 dsh 进程不可见。标签页空闲且无子代理、作业时不列入告警名单，但重启仍会终止该进程。
+- **检测失败不当作“没有活动”**：`agents` / `jobs` 缺席、形态不符或枚举抛错时照常重启；文案说明无法确认状态，日志记录失败原因。
+- **检测到杀进程之间有窗口**：静默 2 秒加驱动脚本身份解析期间新开始的活动不会进入本次告警或已保存快照；目前不做复检与取消。
 
-### 重启前的交接保存（v0.3.0，可选服务 `slHandoff`）
+### 重启前刷新 SL 工作表（`slHandoff.saveAll`，v0.8.0）
 
-- **它是什么**：重启会硬杀宿主，本会话在飞的工作靠两样东西接回来 —— 本插件的「已重启」注入，
-  以及 `dsh-host-sl` 的交接记录（"重启前你在做什么"）。所以本插件在**发起重启前**顺手请对方存一份。
-- **调用面**：`ctx.get('slHandoff').saveAll({ all: true, noteSessionId, session })`
-  （服务由 `dsh-host-sl` 提供）。`all:true` = "覆盖所有活跃会话"；`noteSessionId` = 发起重启的这个
-  会话；`session` = 服务枚举不到 live agent 表时的退路（只存这一个）。
-  **v0.5.0 起不再传 `note`**：调用它只是为了把对方的活跃工作表刷到最新，"续跑消息由谁注入"仍按
-  `pendingSummary` 让位，但注入内容里**没有**本插件的说明（`noteSessionId` / `session` 两个形参
-  保留 —— v0.7.0 的 `dsh-host-sl` 不读它们，保留只为兼容）。
-  **`slHandoff` 故意不进 `inject`**：inject 是"全有才 apply"的硬门，写进去就等于"dsh-host-sl
-  没装时本插件连工具都不注册"。所以用 `ctx.get()` 可选读取，并由静态用例钉住"它不在 inject 里"。
-- **顺序（硬要求）**：两条拒绝路径之后 → **`await` 保存完成** → 写重启标记 → 启动驱动脚本 → 返回。
-  - 放在**拒绝路径之后**：那两条（拿不到归属会话 / 子代理发起）的语义是"一个字节都不写盘"，
-    那时不该留下交接记录；"其它会话有活在跑"自 v0.4.0 起**不是**拒绝路径，照常走到这里；
-  - 放在**启动驱动脚本之前**：那 2 秒静默窗口由驱动脚本从自己启动那一刻开始计时、只用来保证
-    "本次工具结果落盘"；保存排在它前面只会让"发起重启"整体晚一点点，**不会挤占这个窗口**。
-    反过来（先起脚本再存）才会真的吃掉窗口。`test/inject-coverage.test.mjs` 用源码位置静态钉住这个顺序。
-- **实测耗时**（2026-09-28，本机；脚本读内存历史 + 渲染 + 写盘，各跑 15 次取中位）：
-
-  | 场景 | 最快 | 中位 | 最慢 | 记录文件 |
-  |---|---|---|---|---|
-  | 会话 500 条消息 | 2.3ms | 3.4ms | 8.9ms | 3.0 KB |
-  | 会话 2000 条消息 | 3.7ms | 4.4ms | 7.2ms | 3.1 KB |
-  | 会话 5000 条消息 | 6.3ms | 7.3ms | 10.0ms | 3.1 KB |
-  | 三个 500 条会话批量（未来形状） | 5.3ms | 6.7ms | 8.7ms | 各 3 KB |
-
-  记录正文有分节上限，所以文件大小恒定在 3 KB 上下，耗时主要跟"扫多少条消息"走 —— **毫秒级**，
-  相对 2 秒静默可忽略。**未测到的部分如实标注**：`session.deriveMessages()` 是宿主侧的活（内存投影
-  重建），上表用的是等价大小的内存数组；宿主那一层的量级同阶（单次全量扫描 + 字符串处理），
-  真要出事也是秒级以上的异常会话，那时它拖慢的是**发起重启**，而不是静默窗口。
-- **完全 fail-soft**：服务不存在、`save` 不是函数、取 `save` 就抛（代理/getter）、调用抛错、
-  服务返回 `ok:false` —— 一律**只写一行日志** + 把原因写进工具返回文案，**绝不阻断重启**：
-  - 成功：`重启前已保存会话交接记录:<记录文件路径>(新进程启动时会由 dsh-host-sl 注入回本会话)。`
-  - 失败：`重启前的会话交接未保存:<原因>(不影响本次重启)。`
-- **服务接口：`saveAll` 覆盖所有活跃会话**（2026-09-28 晚）：`saveAll(options)` 里
-  `options.all = true`，`dsh-host-sl` 会枚举 `ctx.agents.list()` 里的每一个 live agent
-  （顶层会话 + 子代理）各存一份记录，一次调用只写一份列表标记。**为什么必须这样**：重启硬杀整个
-  进程，在飞的活不止当前这一个会话 —— 用户开着几个标签页、会话下还挂着后台子代理；本插件自己
-  **只复活发起重启的会话**，其余会话与全部子代理的续跑**完全靠这份交接**（新进程里由 `dsh-host-sl`
-  按"先顶层、后子代理"的顺序逐个唤回）。只存当前会话 = 那些会话重启后没有交接可续。
-  - **不传 `note`（v0.5.0）**：注入内容由接手方（`dsh-host-sl` 的【sl 交接续跑】）给出，本插件
-    不往里塞说明；`options.noteSessionId` 仍带上，只作兼容（v0.7.0 的 `dsh-host-sl` 不读它）。
-  - **只认 `saveAll`，不退回 `save`**：`dsh-host-sl` v0.3.0 只有 `save`（单会话）。退回就等于
-    悄悄回到"只存当前会话"，而"服务形态不符"本身是 fail-soft 的一条（只记一行日志、照常重启，
-    文案里写清"需要 dsh-host-sl v0.4.0+"），不会把重启卡住。
-  - **枚举不到 live agent 表时**，`dsh-host-sl` 侧会 fail-soft 退回"只存 `session` 那一个"
-    （本插件传的就是当前会话）—— 所以最坏情况与旧行为等价，不会"一个都不存"。
+- **调用顺序**：检测 → `await saveAll({all:true, noteSessionId, session})` → 写本插件标记 → 启动驱动脚本。`dsh-host-sl` 的 `saveAll` 等待活动重算，最多 5 秒；本插件额外设 7 秒上限。任一服务缺席、抛错、返回失败或超时都不阻断重启。
+- **返回语义**：`ok:true` 表示工作表已写盘；`refreshed:true` 表示完整枚举与重算成功。若 `refreshed:false`，服务仍会提交最近已知表，并把不完整原因返回；restart 插件只把实际写盘成功的 `items` 计入会话 ID 清单。记录文件路径去重后显示。
+- **服务边界**：工作表只覆盖被判定为 `turn / subagent` 的条目，不包含 job / schedule / goal-only 活动。发起会话仍由本插件的重启标记续接；其它会话只有出现在已提交条目清单中时，才会由 dsh-host-sl 尝试唤醒。
+- **写入与恢复不是断点执行**：被打断的工具调用本身无法恢复；会话只会带着原有上下文重新开始一轮。作业结果属于宿主内存态，进程终止后不可恢复。
+- **v0.8.0 之前的描述仅为历史**：早期版本把全部活跃会话保存描述成可自动恢复；当前实现以 `saveAll` 实际返回的条目与 `refreshed` 状态为准。
 - **与「已重启」注入的合并（v0.4.2，2026-09-29 用户拍板）**：一次重启**只注入一条消息、只跑一轮**。
   - **旧版为什么是两条**：两条注入各自独立 —— 本插件路径更短（apply 后 4s + `resolveAgent`，约 4s）
     必然先跑；`dsh-host-sl` 多一步 `list()` 判定（约 6s）排进 next-turn ⇒ **第一轮拿不到交接记录**，
@@ -387,7 +327,7 @@ dsh 的 pwsh 工具走 `dsh-subprocess-local`，Windows 上 `detached:false` 且
   不想要就手工删 `~\.dsh\storages\sl-handoff\pending.json`。
 - **只杀本实例**：驱动脚本按"本实例身份"选进程 —— 精确 pid（插件注入的宿主 pid，命令行已校验）
   → 退按 profile 名 + 端口扫描 → 仍确定不了 ⇒ **退出码 4，一个进程都不杀**（fail closed）。
-  为什么必须这样：profile 名是 dsh 的**位置参数**（`dsh web …` 等价 `dsh --profile web`），
+  为什么必须这样：profile 名是 dsh 的**位置参数**（`dsh desktop …` 等价 `dsh --profile desktop`），
   所以"命令行含 ` web `"这种判据跨实例 —— 2026-09-21 试跑实测，从 teamlab 实例（`--port 3090`）
   发起重启会杀掉 web 实例（3080）。桌面 `kill_dsh.bat` 仍是那个跨实例判据，只作人工工具，
   驱动脚本**已不再调用它**。旧版插件（不传身份参数）启动新脚本时，脚本会从重启标记的
@@ -395,9 +335,6 @@ dsh 的 pwsh 工具走 `dsh-subprocess-local`，Windows 上 `detached:false` 且
   所以"改完插件之后的第一次重启"不会空转。
 
 ## 5. 排障
-
-下面写的 `<工具目录>` 指**驱动脚本与日志所在的目录**：默认是 `<DSH_HOME>\tools`（`DSH_HOME` 未设时
-即 `~\.dsh\tools`），用 `restartScript` / `logFile` 改过就以配置为准（见 §2）。
 
 | 现象 | 查什么 |
 |---|---|
@@ -408,12 +345,12 @@ dsh 的 pwsh 工具走 `dsh-subprocess-local`，Windows 上 `detached:false` 且
 | 重启后两条消息都到了 / 只到了「已重启」 | 搜 `交接记录不会接手本次注入(`（原因：服务缺席 / 没有标记 / 本会话不在标记里 / 读不到 / 形态不符 ⇒ 照旧自己注入）与 `交接记录没接手(`（兜底：对方让位或失败了，本插件 10s 后自己补了一条）。两条都到说明**兜底那次**与对方那条撞上了 —— 只有"对方让位后又成功注入"才会这样，日志里 `交接记录复查:` 那行会写清当时看到的状态 |
 | 交接记录那条一直没来、会话没人叫醒 | ① `~\.dsh\storages\sl-handoff\sl-handoff.log` 搜 `恢复判定：` / `本次恢复结束：`（对方是不是让位/整份归档了）；② `<工具目录>\dsh-restart.log` 搜 `交接记录复查:` —— 若写的是 `待续标记里已没有本会话的未处理条目(dsh-host-sl 已接手),兜底注入跳过`，说明对方把条目移除了却没注入（§4 末尾那条已知残留：超期旧标记被归档） |
 | 工具返回文案说"本次重启会打断 N 个其它会话" | 这是**告知**不是拦阻（v0.4.0 起重启不会被拒绝）：文案里已点名 id、原因与交接记录存没存下；日志里搜 `会话检测:`（含每条原因 `session` / `subagent` / `job`）与 `其它会话有活在跑(N 个),不再拒绝:照常重启`。想避免打断就把重启推迟到它们跑完 |
-| 想确认"这次打断了谁、接回来没有" | 被打断名单看工具返回文案或日志那两行；能不能接回来看 `~\.dsh\storages\sl-handoff\sl-handoff.log` 的逐条 `恢复条目成功：…`（失败条目写原因并留在标记里等下次启动） |
+| 想确认"这次打断了谁、接回来没有" | 对照工具返回的实际工作表 ID 和 `refreshed`；仅符合 turn / subagent 且列入工作表的会话才会尝试唤醒。逐项结果看 `~\.dsh\storages\sl-handoff\sl-handoff.log` 的逐条 `恢复条目成功：…`（失败条目写原因并留在标记里等下次启动） |
 | 怀疑检测失效（说不清会打断谁） | 日志里搜 `无法检测其它会话(`：出现即说明 `agents`/`jobs` 服务形态漂移，检测已 fail-soft 跳过（这是它唯一的失效信号，重启照常但文案只说"没能读到宿主会话表"） |
-| 工具返回文案说「重启前的会话交接未保存」 | 看同一行给的原因：`slHandoff 服务不可用(dsh-host-sl 未装载?)` ⇒ 对端插件没装/没加载（重启照常）；`不是函数` ⇒ 服务形态漂移（**旧版 `dsh-host-sl`（≤v0.3.0）只有 `save`、没有 `saveAll`，也会走这条**，文案里写着"需要 v0.4.0+"）；`抛错(...)` ⇒ 对端保存时炸了。日志里搜 `重启前的交接保存` / `调用 slHandoff.saveAll()` 有同一条记录 |
-| 想确认"对端插件到底装没装" | **别再找 apply 那行了**（v0.4.1 起 apply 阶段不探测 —— 那一刻 `dsh-host-sl` 还没把服务挂上，旧版那行"服务不在场(dsh-host-sl 未装载?)"是**假阴性**）。现在在 `<工具目录>\dsh-restart.log` 里搜 `(首次调用时探测)`：`服务在场(首次调用时探测)` = 真装好了；`服务不在场(dsh-host-sl 未装载?)…(首次调用时探测)` = 确实没装/没加载；`服务在场但没有 saveAll()(接口形态不符,dsh-host-sl 需要 v0.4.0+)` = 装的是旧版。若探测结论与真实调用结果不一致，紧跟的 `交接服务探测说"…",但真实调用…` 那行会说明**以真实调用为准**。**没调用过 `restart_dsh` 工具或 `/restart` 指令就不会有这行**（惰性探测，只探一次） |
-| 想确认这次重启到底存没存交接 | `<工具目录>\dsh-restart.log` 搜 `重启前已保存会话交接记录(N 个会话):`（成功，含**全部**记录文件路径）或 `重启前的交接保存未成功:`（失败，含原因）；记录文件本体在 `~\.dsh\storages\sl-handoff\` |
-| 重启后只有发起重启的会话被唤醒，别的会话没动静 | 本插件**只复活发起重启的那个会话**；其余会话靠 `dsh-host-sl` 的交接记录唤回。查 `~\.dsh\storages\sl-handoff\sl-handoff.log`：应有 `发现待续标记：共 N 条（顶层 a / 子代理 b）` 与逐条 `恢复条目成功：…`；失败条目会写原因并留在标记里等下次启动 |
+| 工具返回文案说「重启前未能确认 SL 工作表写入」 | 看同一行给的原因：`slHandoff 服务不可用(dsh-host-sl 未装载?)` ⇒ 对端插件没装/没加载（重启照常）；`不是函数` ⇒ 服务形态漂移（**旧版 `dsh-host-sl`（≤v0.3.0）只有 `save`、没有 `saveAll`，也会走这条**）；`抛错(...)` ⇒ 对端保存时炸了。日志里搜 `重启前工作表未成功提交` / `调用 slHandoff.saveAll()` 有同一条记录 |
+| 想确认"对端插件到底装没装" | **别再找 apply 那行了**（v0.4.1 起 apply 阶段不探测 —— 那一刻 `dsh-host-sl` 还没把服务挂上，旧版那行"服务不在场(dsh-host-sl 未装载?)"是**假阴性**）。现在在 `<工具目录>\dsh-restart.log` 里搜 `(首次工具调用时探测)`：`服务在场(首次工具调用时探测)` = 服务可读；`服务不在场(dsh-host-sl 未装载?)…(首次工具调用时探测)` = 确实没装/没加载；`slHandoff.saveAll 不是函数(接口形态不符,需要 dsh-host-sl v0.4.0+)` = 装的是旧版。若探测结论与真实调用结果不一致，紧跟的 `交接服务探测说"…",但真实调用…` 那行会说明**以真实调用为准**。**没调用过 `restart_dsh` 就不会有这行**（惰性探测，只探一次） |
+| 想确认这次重启到底存没存交接 | `<工具目录>\dsh-restart.log` 搜 `重启前工作表已提交:`（写入成功，含条目数与刷新状态）或 `重启前工作表未成功提交:`（失败原因）；记录文件本体在 `~\.dsh\storages\sl-handoff\` |
+| 重启后只有发起重启的会话被唤醒，别的会话没动静 | 检查被打断会话的 ID 是否出现在重启结果的工作表清单，以及 `refreshed` 是否为 true；job-only 会话不会由 `dsh-host-sl` 唤醒。查 `~\.dsh\storages\sl-handoff\sl-handoff.log`：应有 `发现待续标记：共 N 条（顶层 a / 子代理 b）` 与逐条 `恢复条目成功：…`；失败条目会写原因并留在标记里等下次启动 |
 | 重启后页面卡"启动中" | `<工具目录>\dsh-watchdog.log`（看门狗侧）与 `dsh-watchdog-dsh.log`（dsh 侧），本插件不参与端口接管 |
 | 想确认是不是本插件干的 | `~/.dsh/storages/plugins.json` 里的 `restart-dsh` 条目 + 工具表里的 `restart_dsh` |
 | 从别的 profile 实例发起重启，怕误杀生产实例 | 日志里搜 `本实例身份:` 与 `本实例的 dsh 进程(…)`（含判据来源）；解析不出身份会写 `fail closed(退出 4)`，此时**一个进程都没被杀**，把 `-ProfileName`/`-Port` 补进调用参数即可 |
@@ -426,7 +363,7 @@ dsh 的 pwsh 工具走 `dsh-subprocess-local`，Windows 上 `detached:false` 且
 ```powershell
 cd ~\.dsh\profiles\desktop\plugins\dsh-host-restart
 $env:DSH_RESTART_NO_LAUNCH='1'    # 结构性熔断:不设它就别跑(放行用例会真的起进程)
-node --test "test/*.test.mjs"     # 131 个用例,分布在八个文件:
+node --test "test/*.test.mjs"     # 99 个用例,分布在六个文件:
                                   #   pending(8):标记判定 / 注入文案 / 启动命令行 / 配置校验(纯函数);
                                   #     v0.5.0 起那条"注入文案"断言的是**恒为固定句**:传了 note 也不许被拼进去
                                   #   inject-coverage(11):静态断言 ctx.<service> 都已声明 inject、
@@ -440,7 +377,7 @@ node --test "test/*.test.mjs"     # 131 个用例,分布在八个文件:
                                   #     **重启前的交接保存**:服务在场(含**多会话返回多路径**)/
                                   #     缺席(在飞时文案不许谎称已存)/抛错/形态不符(旧版只有 save ⇒ 也算形态不符)/
                                   #     返回 ok:false/异步实现/重启失败也报交接结果;
-                                  #     **交接服务的探测时机(v0.4.1)**:首次调用时写一次(在场/不在场/形态不符三种)/
+                                  #     **交接服务的探测时机(v0.4.1)**:首次工具调用时写一次(在场/不在场/形态不符三种)/
                                   #     同一实例只探一次/探测只读(不影响真实保存)/探测与真实结果不一致时如实区分;
                                   #     两条真拒绝(无归属会话 / 子代理发起)仍不写盘、不存交接
                                   #   instance-identity(9):本实例身份解析 + "多 profile 下只命中自己"的判据
@@ -454,20 +391,6 @@ node --test "test/*.test.mjs"     # 131 个用例,分布在八个文件:
                                   #     恰好登记一处清理(且没有任何 dispose 处理器)/ 执行它 ⇒ 工具 disposer 被调用、
                                   #     「启动注入」与「兜底复查」两个定时器被取消、`disposed` 置位 /
                                   #     可重复调用(不重复调 disposer、不把异常抛回 cordis)/ 反向对照:不清理则定时器到期真的注入
-                                  #   desktop-mode(16,**v0.6.0 新增**):桌面端身份判据 —— 按 pid + exe 路径
-                                  #     解析本实例身份(web 端仍是 profile/端口)/ exe 只接受绝对路径且不含双引号 /
-                                  #     命令行里取 exe 的规范化(剥引号、统一分隔符、小写比较)与"裸路径不许按空格切分"/
-                                  #     整棵树都算命中 / 启动命令行带 `-Mode desktop` 与 `-DesktopExe`(含参数注入护栏)/
-                                  #     与驱动脚本 `Test-DshInstanceCommandLine` 同一条正则的 JS 镜像
-                                  #   restart-command(16,**v0.7.0 新增**):人工指令 `/restart` —— 指令名合法
-                                  #     (^[a-z][a-z0-9_-]*$ 且与工具名不同)/ 注册形态(描述非空、无 input)/
-                                  #     `commands` 服务缺席、形态不符、register 抛错都只降级(绝不抛回 loader)/
-                                  #     **不进 inject** 且源码里不许出现 `ctx.commands` 属性访问 /
-                                  #     **与工具共用同一个执行体**:两条入口写出的标记逐字节相同,只有失败文案前缀
-                                  #     与成功文案说给谁听不同(指令文案不含"请立刻结束本轮回复")/
-                                  #     真拒绝两条(无归属会话、子代理发起)与带参数报用法错 ⇒ 都不写标记、不碰启动桩 /
-                                  #     启动通道全失败时标记被撤销 / 返回形态始终是合法 `CommandResult`(error 的 text 非空)/
-                                  #     卸载时命令 disposer 与工具 disposer 一起被回收 / 版本行回显 v0.7.0
 ```
 
 ### 测试纪律（硬性，2026-09-21 事故换来的）
@@ -493,7 +416,7 @@ node --test "test/*.test.mjs"     # 131 个用例,分布在八个文件:
 | 交接服务缺席时"假装成功"（返回 `ok:true`） | **2 条红**（服务缺席用例 + 单测里那条 fail-soft） |
 | 交接调用抛错时不再 fail-soft（把异常直接抛给工具层） | **2 条红**（抛错用例 + 单测里那条 fail-soft） |
 
-**2026-09-28 晚（改用 `saveAll` 覆盖所有活跃会话）的变异验证**（同样：改坏 → 跑全量 → 还原 → 核对 SHA256
+**历史验证记录：2026-09-28 晚（当时 `saveAll` 覆盖 live agents）的变异验证**（同样：改坏 → 跑全量 → 还原 → 核对 SHA256
 = `872CBE57FA21B56410FADC5A8DDE93B9EB3D156E526B879F8D755F28D02FC0D1`）：
 
 | 变异 | 结果 |
@@ -553,7 +476,7 @@ v0.4.0 是 `B8A43BEA630591FE6955268DABAA41AC873358ACC09627FFA388740BE5F57FBD` / 
 强制走"自行拉起"分支并用假 dsh 替代真实入口；默认不开时行为与生产完全一致：
 
 ```powershell
-pwsh -File "<工具目录>\dsh-restart.ps1" -SelfLaunchTest -TestDshEntry <假 dsh.js> `
+pwsh -File <工具目录>\dsh-restart.ps1 -SelfLaunchTest -TestDshEntry <假 dsh.js> `
      -ProfileName webtest -Port 39011 -WaitSeconds 0 -LogFile <临时目录>\drill.log
 ```
 
@@ -562,8 +485,8 @@ pwsh -File "<工具目录>\dsh-restart.ps1" -SelfLaunchTest -TestDshEntry <假 d
    里写一行 `- id: restart-dsh` + `disabled: true` 覆写（profile 层在包层之后应用 ⇒ 覆写优先）
    —— 这两条路动的都是 dsh-hmr 监视的输入（profile 的 `package.json` / `cordis.patch.yml`），
    保存即触发重组合，工具消失；
-2. 在 profile 目录下跑 `pnpm remove dsh-host-restart`
-   （⚠ 若报 `ERR_PNPM_RESOLUTION_POLICY_VIOLATIONS_UNHANDLED`，
+2. `node <工作区>\dsh\dsh-plugin-manager\dshpm.mjs remove dsh-host-restart --profile desktop`
+   （在 profile 目录下执行；⚠ 若 `pnpm remove` 报 `ERR_PNPM_RESOLUTION_POLICY_VIOLATIONS_UNHANDLED`，
    改跑 `pnpm remove dsh-host-restart --config.minimum-release-age=0`，见 §5）；
 3. 删 `~/.dsh/profiles/desktop/plugins/dsh-host-restart/`、`<工具目录>\dsh-restart.ps1`，
    可选删 `<工具目录>\dsh-restart.log` 与 `~/.dsh/storages/dsh-restart/`；
@@ -571,51 +494,47 @@ pwsh -File "<工具目录>\dsh-restart.ps1" -SelfLaunchTest -TestDshEntry <假 d
 
 ## 7. 改动这个插件（四步，别跳）
 
+> **2026-10-03 订正（两处与旧文不符）**：① 下面的路径原先写的是 **web profile**（已退役），现役是
+> **desktop profile**；② 本包在 desktop profile 下的两份副本是**硬链接（同 inode）**，不再是"独立
+> 拷贝" —— 于是旧的"必须 `remove` 再 `add`"**不再需要**，原地写入改文件即可，两份自动同步。
+> ⚠ **不能用"写临时文件再 rename"的写法**（编辑器另存、写文件类工具、`Copy-Item` 覆盖）—— 那会当场
+> **打断链接**，让运行副本留在旧内容，而 `pnpm install` 不会修回来。原地写入的两种写法：
+> `[System.IO.File]::WriteAllText(绝对路径, 文本)`，或 Node 的 `fs.writeFileSync(path, text)`。
+
 ```powershell
-# 1) 改源码(唯一真源在 plugins\ 下)
+# 1) 改源码(唯一真源在 plugins\ 下;必须原地写入,见上面的 ⚠)
 notepad ~\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js
 
 # 2) 跑测试 —— inject 覆盖自检能挡住"宿主起不来"这类改动
 cd ~\.dsh\profiles\desktop\plugins\dsh-host-restart ; node --test "test/*.test.mjs"
 
-# 3) 同步到真正被加载的那份(直接 add 可能报 Already up to date 而不同步,必须 remove 再 add)
-cd ~\.dsh\profiles\desktop
-pnpm remove dsh-host-restart
-pnpm add file:./plugins/dsh-host-restart
-#    ⚠ 这两条只动 node_modules 与 dependencies —— 若 profile 的 package.json 里
-#      dsh.profile.bundles 没有 dsh-host-restart 这一项,记得自己补上(否则不会被当组合包加载)
+# 3) 核对两份副本没断链(硬链接形态下不需要 remove/add)
+fsutil hardlink list ~\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js
+Get-FileHash ~\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js,
+             ~\.dsh\profiles\desktop\node_modules\dsh-host-restart\lib\index.js -Algorithm SHA256
 
 # 4) 重启 dsh —— loader 按 URL 缓存模块,改 lib/*.js 必然要重启。
-#    v0.7.0 起有两种发起方式:模型调 restart_dsh 工具,或人直接在输入框敲 /restart 指令(两者同一执行体)。
+#    v0.7.0 起有两种发起方式:模型调 restart_dsh 工具,或人直接敲 /restart 指令。
 #    ⚠ 但"这次改动本身"要等重启后才生效 ⇒ 第一次重启还得用工具/手动,之后 /restart 才可用。
 ```
 
-包内 `cordis.patch.yml` 属**包层 patch**（同上需同步到副本）：改它不需要重启，但**不会自己触发重组合**
-—— dsh-hmr 只监视 profile 的 `cordis.patch.yml`、home 层 `cordis.patch.yml` 与 profile 的 `package.json`
-三个输入（`dsh-hmr/lib/index.js:353-376`），包内文件不在其中；重组合时会重读全部 bundle 层，所以改完
-要有一次触发才被读入：在插件页点一下本卡（或任意行级）开关，或保存 profile 的 `cordis.patch.yml`
-里任意一处改动。只有 `lib/*.js` 这类模块代码受 URL 缓存限制，必须走上面的第 4 步重启。
+包内 `cordis.patch.yml` 属**包层 patch**（同为硬链接，改法同上）：改它不需要重启，但**不会自己触发
+重组合** —— dsh-hmr 只监视 profile 的 `cordis.patch.yml`、home 层 `cordis.patch.yml` 与 profile 的
+`package.json` 三个输入（`dsh-hmr/lib/index.js:353-376`），包内文件不在其中；重组合时会重读全部 bundle
+层，所以改完要有一次触发才被读入：在插件页点一下本卡（或任意行级）开关，或保存 profile 的
+`cordis.patch.yml` 里任意一处改动。只有 `lib/*.js` 这类模块代码受 URL 缓存限制，必须走第 4 步重启。
 
-同步是否真的发生，用 SHA256 对一下两份（`test/` 不进运行副本，测试从源码目录跑）：
-
-```powershell
-Get-FileHash ~\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js,
-             ~\.dsh\profiles\desktop\node_modules\dsh-host-restart\lib\index.js -Algorithm SHA256
-```
-
-两个哈希必须一致 —— **拷贝文件改完源码没同步、或没核对哈希，就等于"改了没生效"**（§8 第 3 条踩过一次）。
-
-不想经历 `remove` 造成的空窗（宿主正在服务用户的会话时）也可以**直接覆盖改动的文件** ——
-那对本包这种拷贝文件成立（硬链接文件则要原地改写，直接覆盖会断链），依赖规格没变时 lockfile 无需更新：
+若哪次操作之后两份真的漂移了（例如用了会断链的写法），就地同步一次即可：
 
 ```powershell
-Copy-Item ~\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js `
-          ~\.dsh\profiles\desktop\node_modules\dsh-host-restart\lib\index.js -Force
-# README 等其它改了文件同理;然后照上面核对 SHA256
+# 以源码为准覆盖运行副本(原地写入,不要用 Copy-Item)
+$src = [System.IO.File]::ReadAllText("$env:USERPROFILE\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js")
+[System.IO.File]::WriteAllText("$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-host-restart\lib\index.js", $src)
+# 然后照第 3 步核 SHA256
 ```
 
-（若改用 `dsh-plugin-manager`（`dshpm`）这类封装命令代替上面两步，记得加 `--no-verify`：
-它收尾的 `dsh --dump-config` 校验会挂住不返回。）
+（本机用 `dshpm` 时固定加 `--no-verify`：它收尾的 `dsh --dump-config` 校验会挂住不返回。）
+
 
 ## 8. 事故记录（2026-09-17，三条都已变成测试或流程）
 
@@ -632,7 +551,7 @@ Copy-Item ~\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js `
   `15:05:36.943Z 重启前的交接保存:slHandoff 服务不在场(dsh-host-sl 未装载?),工具照常可用`；
   v0.4.1 之后（15:58、16:05 两次启动）apply 阶段一条都没有。
 - **首次工具调用时探测一次，结论正确**：`16:05:27.985Z 重启前的交接保存:slHandoff 服务在场(首次工具调用时探测)`
-  —— 同一轮里 `saveAll` 真的存下 2 份记录（工具文案 `重启前已保存会话交接记录:<路径1>、<路径2>`），
+  —— 同一轮里旧版 `saveAll` 曾存下 2 份记录（工具文案为当时的 `重启前已保存会话交接记录:<路径1>、<路径2>`），
   探测结论与真实调用一致，"说不在场、其实在场"的假阴性消失。
 - **未覆盖**：`不在场` / `形态不符`（旧版 `dsh-host-sl` 只有 `save`）/ 探测抛错三条分支只有离线用例，
   真机没造过（要造得先卸掉或换掉 `dsh-host-sl`，代价大于收益）。
@@ -659,19 +578,19 @@ Copy-Item ~\.dsh\profiles\desktop\plugins\dsh-host-restart\lib\index.js `
 
 ## 11. 验收记录（2026-09-29 01:51，v0.4.2）
 
-一次工具重启（发起会话 `session-ca1f2a92`，重启前保存 2 个会话）后的实际日志，逐条对上 §10 的四条判据：
+一次工具重启（发起会话 `session-<uuid>`，重启前保存 2 个会话）后的实际日志，逐条对上 §10 的四条判据：
 
 - **判据 1（版本已装载）** ✅ `17:51:46.222Z apply: v0.4.2 pendingFile=… script=… wait=2s(固定) handoff=slHandoff(可选,不进 inject)`
 - **判据 3（让位日志）** ✅
-  `17:51:50.683Z 交接记录将接手注入，本次不再单独注入「已重启」:待续标记里有本会话 session-ca1f2a92-… 的未处理条目(来源=service,kind=root,active=true) —— note 已随 saveAll 写进记录正文的「下一步」一节;10000ms 后复查兜底`
-  （**这行是 v0.4.2 的原文，会话 id 已截短**；v0.5.0 起日志里这半句改成 `注入内容由对方的【sl 交接续跑】给出(本插件不往里面塞说明)`）
+  `17:51:50.683Z 交接记录将接手注入，本次不再单独注入「已重启」:待续标记里有本会话 session-<uuid> 的未处理条目(来源=service,kind=root,active=true) —— note 已随 saveAll 写进记录正文的「下一步」一节;10000ms 后复查兜底`
+  （**这行是 v0.4.2 的原文**；v0.5.0 起日志里这半句改成 `注入内容由对方的【sl 交接续跑】给出(本插件不往里面塞说明)`）
   —— `来源=service`：`dsh-host-sl.pendingSummary()` 这条路真的生效（不是退回读文件）。
 - **判据 4（兜底没被触发）** ✅
-  `17:52:00.693Z 交接记录复查:待续标记里已没有本会话 session-ca1f2a92-… 的未处理条目(dsh-host-sl 已接手),兜底注入跳过`
+  `17:52:00.693Z 交接记录复查:待续标记里已没有本会话 session-<uuid>… 的未处理条目(dsh-host-sl 已接手),兜底注入跳过`
   —— 10 秒后复查看到对方已接手、没补第二条；全程没有 `交接记录没接手(`。
 - **判据 2（只有一条续跑消息）** ✅ 会话侧只收到**一条** user 消息（【sl 交接续跑】…），
   没有单独的「已重启。…」（v0.5.0 起那条固定文案是 `dsh已重启,继续`）；同批 `sl-handoff.log`：
-  `17:51:52.124Z 恢复条目成功：顶层 session-ca1f2a92…`。
+  `17:51:52.124Z 恢复条目成功：顶层 session-<uuid>…`。
 
 **未覆盖**（同 §10 末尾）：兜底那两条真机分支（对方让位/失败 ⇒ 10s 后补注入；会话已 running ⇒ 不补）
 与 `来源=file` 退路，都只有离线用例 —— 要造得让 `dsh-host-sl` 在重启后那次启动里让位（例如另一个顶层
@@ -763,8 +682,8 @@ Electron 主进程把 Host 当子进程管（`DesktopHostProcess`）：**Host �
 演练开关的用法（离线自测，零副作用）：
 
 ```powershell
-pwsh -File "<工具目录>\dsh-restart.ps1" -SessionId test -WaitSeconds 0 -Mode desktop \
-  -DesktopExe "$env:LOCALAPPDATA\Programs\DeepSeek Harness\DeepSeek Harness.exe" \
+pwsh -File <工具目录>\dsh-restart.ps1 -SessionId test -WaitSeconds 0 -Mode desktop \
+  -DesktopExe "$env:USERPROFILE\AppData\Local\Programs\DeepSeek Harness\DeepSeek Harness.exe" \
   -Port 19387 -DesktopDryRun
 # 期望:身份校验通过 → "命中主进程=1 整棵树=N 个进程" → exit 0
 ```
@@ -854,7 +773,7 @@ pwsh -File "<工具目录>\dsh-restart.ps1" -SessionId test -WaitSeconds 0 -Mode
 |---|---|---|
 | 1 | `npm test` 全绿 | ✅ **131/131**（新增 `test/restart-command.test.mjs` 16 条） |
 | 2 | 指令注册进注册表 | ✅ `18:31:44 /restart 指令已注册(commands.register 返回 disposer=true)` |
-| 3 | 指令能被人敲出来并执行 | ✅ `18:32:04 /restart 调用:session=session-519efee5… wait=2s launcherPid=29132 mode=headless dshPid=19816` |
+| 3 | 指令能被人敲出来并执行 | ✅ `18:32:04 /restart 调用:session=session-<uuid>… wait=2s launcherPid=29132 mode=headless dshPid=19816` |
 | 4 | 重启后本会话自动接回 | ✅ 02:32:07 杀整棵树 → 02:32:13 新实例就绪 → 02:32:14 注入「已重启」回同一会话 |
 | 5 | 让位逻辑未受影响 | ✅ 当时本会话空闲 ⇒ `saveAll` 存下 0 个会话 ⇒ 插件照旧自己注入（没把注入让给一张空表） |
 | 6 | 工具没被影响 | ✅ 新进程里 `restart_dsh 工具已注册(disposer=true)`，与指令并存 |
@@ -865,10 +784,10 @@ pwsh -File "<工具目录>\dsh-restart.ps1" -SessionId test -WaitSeconds 0 -Mode
 ```
 2026-10-03T18:31:44.805Z [plugin] apply: v0.7.0 mode=desktop …
 2026-10-03T18:31:44.807Z [plugin] /restart 指令已注册(commands.register 返回 disposer=true)
-2026-10-03T18:32:04.442Z [plugin] /restart 调用:session=session-519efee5-… launcherPid=29132 mode=headless
+2026-10-03T18:32:04.442Z [plugin] /restart 调用:session=session-<uuid>… launcherPid=29132 mode=headless
 2026-10-04T02:32:07.493+08:00 [ps1] 桌面端:准备终止 5 个进程(pid=27012, 27124, 24016, 6460, 19816)
 2026-10-04T02:32:13.845+08:00 [ps1] 桌面端:新实例已就绪(第 1 次尝试,pid=30596,端口 19387 已应答)
-2026-10-03T18:32:14.442Z [plugin] 已向会话 session-519efee5-… 注入「已重启」
+2026-10-03T18:32:14.442Z [plugin] 已向会话 session-<uuid>… 注入「已重启」
 ```
 
 ⚠ 一个值得记住的时序细节：**第一次重启仍然得靠手动或工具**（模块按 URL 缓存，新代码要等新进程才加载）
