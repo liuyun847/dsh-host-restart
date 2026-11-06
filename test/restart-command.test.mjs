@@ -28,6 +28,7 @@ import { test } from 'node:test'
 import {
   COMMAND_NAME,
   DEFAULT_INJECT_TEXT,
+  SILENT_COMMAND_TEXT,
   TOOL_NAME,
   VERSION,
   WAIT_SECONDS,
@@ -254,6 +255,39 @@ test('指令文案是给人看的:不含工具那句"请立刻结束本轮回复
   assert.ok(text.includes(scene.pendingFile), '标记路径要写出来(排障用)')
 })
 
+test('空会话 /restart:返回零宽哨兵(静默成功),不再返回指令卡片正文', async () => {
+  const scene = await callCommand({}, {
+    invocation: {
+      commandId: 'cmd-empty',
+      agent: { session: { id: 'session-self', header: { origin: 'main' }, log: [{ type: 'command/run' }] } },
+      rawInput: '',
+      attachments: [],
+      signal: new AbortController().signal,
+    },
+  })
+  assert.equal(scene.result.kind, 'success')
+  assert.equal(scene.result.text, SILENT_COMMAND_TEXT)
+  assert.equal(SILENT_COMMAND_TEXT, '\u200B', '哨兵必须是一个零宽空格')
+  assert.ok(!scene.result.text.includes('重启已发起'), '空会话不留指令卡片正文')
+  assert.match(readFileSync(testLog, 'utf8'), /空会话:返回静默结果\(零宽哨兵\)/)
+})
+
+test('有对话的 /restart:文案保持"自动续上"(非空会话不受影响)', async () => {
+  const scene = await callCommand({}, {
+    invocation: {
+      commandId: 'cmd-nonempty',
+      agent: { session: { id: 'session-self', header: { origin: 'main' }, log: [{ type: 'user/message' }] } },
+      rawInput: '',
+      attachments: [],
+      signal: new AbortController().signal,
+    },
+  })
+  assert.equal(scene.result.kind, 'success')
+  assert.ok(scene.result.text.includes('新进程起来后本会话自动续上'), scene.result.text)
+  assert.ok(!scene.result.text.includes('不会向本会话注入续跑消息'), scene.result.text)
+  assert.ok(!scene.result.text.includes('\u200B'), '非空会话不许带静默哨兵')
+})
+
 test('指令与工具共用同一个执行体:两条入口写出的标记逐字节相同', async () => {
   const cmdScene = await callCommand()
   const cmdPending = readFileSync(cmdScene.pendingFile, 'utf8')
@@ -366,5 +400,5 @@ test('卸载时命令 disposer 与工具 disposer 一起被回收(清理只登�
 })
 
 test(`版本行回显 v${VERSION}(排障时用它确认"新版本已生效")`, () => {
-  assert.equal(VERSION, '0.8.0')
+  assert.equal(VERSION, '0.10.0')
 })

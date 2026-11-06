@@ -20,10 +20,10 @@
  *
  * ⚠ 2026-09-21 事故 + 本文件的加固(动这个文件之前先读完这段):
  *   上一版只 apply 了 { logFile, pendingDir },而决定「启动哪个脚本 / 用哪个 pwsh」的
- *   restartScript(默认 <DSH_HOME>\tools\dsh-restart.ps1)与 psExe(默认 pwsh)**没被覆盖**,
+ *   restartScript(默认 <工具目录>\dsh-restart.ps1)与 psExe(默认 pwsh)**没被覆盖**,
  *   于是五个"应当放行"的用例真的走通了 writePendingFile → launchDriver → execFile(pwsh, WMI Create):
  *   6~7 秒后真驱动脚本杀掉 dsh,同时掐掉另外两个会话。而它们"看起来通过了" ——
- *   断言等的是测试自己的 logFile,真驱动写的是 <DSH_HOME>\tools\dsh-restart.log,永远等不到启动确认
+ *   断言等的是测试自己的 logFile,真驱动写的是 <工具目录>\dsh-restart.log,永远等不到启动确认
  *   ⇒ 换通道再启一次 ⇒ 最后抛错 ⇒ 断言"通过"。假阴性盖住了真实副作用。
  *
  *   现在放行路径有三道互不重叠的防线,**任意一道成立都不可能起真实进程**:
@@ -42,7 +42,6 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   DEFAULT_INJECT_TEXT,
-  DEFAULT_RESTART_SCRIPT,
   HANDOFF_SERVICE,
   LAUNCH_TIMEOUT_MS,
   MAX_LISTED_SESSIONS,
@@ -269,7 +268,7 @@ function assertAllowPath({ result, stub, pendingFile }, expected = {}) {
   assert.ok(wmiScript.includes('Win32_Process'), '桩收到的应当是一段 Win32_Process.Create 脚本')
   assert.ok(wmiScript.includes(FAKE_SCRIPT), '命令行里必须是假脚本路径')
   assert.ok(!wmiScript.includes('dsh-restart.ps1'), '命令行里绝不能出现真实驱动脚本')
-  assert.ok(!wmiScript.includes(DEFAULT_RESTART_SCRIPT), '命令行里绝不能出现默认驱动脚本路径(用例必须覆盖 scriptPath)')
+  assert.ok(!wmiScript.includes('C:\\run\\tools'), '命令行里绝不能出现 C:\\run\\tools 下的真实路径')
   assert.ok(wmiScript.includes(`-SessionId "${sessionId}"`), '命令行必须带上发起者会话 id')
   assert.ok(wmiScript.includes(`-WaitSeconds ${WAIT_SECONDS}`), `等待必须固定为 ${WAIT_SECONDS}s(参数已删,不可被调用方放大)`)
   // 实例身份:驱动脚本据此只杀"本实例"的 dsh。测试进程 argv 里没有 profile/端口 ⇒ 只带 pid,
@@ -565,6 +564,13 @@ test('formatInterruptedNotice:逐项对照工作表，并区分 job-only / 未�
     others: [{ id: 'session-a', reasons: ['session'] }], own: { subagents: 0, jobs: 0 },
   }, { ok: true, files: [], sessions: [], sessionIds: [], refreshed: true, text: '' })
   assert.ok(empty.includes('1 个未列入工作表'), empty)
+
+  // v0.9.0:空会话 + 交接失败时,恢复说明不许谎称"发起会话仍会被注入续接消息"
+  const emptySession = formatInterruptedNotice({
+    others: [{ id: 'session-a', reasons: ['session'] }], own: { subagents: 0, jobs: 0 },
+  }, failed, true)
+  assert.ok(emptySession.includes('发起会话是空会话,不会注入续跑消息'), emptySession)
+  assert.ok(!emptySession.includes('发起会话仍会由重启插件自己的续接消息恢复'), emptySession)
 })
 // ── 工具层:检测只告知、不拦截(2026-09-28 起)────────────────────────────────
 

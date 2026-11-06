@@ -5,6 +5,14 @@
 # (向 profile 的 cordis.patch.yml 写 disabled 覆盖)。
 # 行 id `restart-dsh` 是上述开关与 settings 命名空间的寻址键，勿改。
 #
+# ⚠ 2026-10-24 变更(v0.10.0;本文件内容未变,只是留档):**空会话手动 /restart 连指令卡片也不留** ——
+#   空会话成功结果改返零宽哨兵 SILENT_COMMAND_TEXT;新增浏览器半身 lib/client.js 按哨兵摘卡。
+#   本 patch 仍只 insert 同一个包;客户端半身由 package.json 的 dsh.client 声明加载。
+#   行为在 lib/index.js + lib/client.js ⇒ 宿主重启一次 + 页面刷新。
+# ⚠ 2026-10-23 变更(v0.9.0;本文件内容未变,只是留档):**空会话重启后不再注入续跑消息** ——
+#   新进程 resolveAgent 之后先判会话里有没有 user/assistant 消息与 turn;没有就只删标记、不注入。
+#   判据在新进程、注入前(2 秒静默窗口里新到的消息仍会接续)。/restart 成功文案同步改写。
+#   行为全在 lib/index.js ⇒ 要重启 dsh 才生效;本 patch 文件未改语义,不需要点开关触发重组合。
 # ⚠ 2026-10-03 变更(v0.7.0;本文件内容未变,只是留档):插件新增人工指令 `/restart` ——
 #   与 restart_dsh 工具**共用同一个执行体** performRestart(会话校验/会话检测/交接保存/写标记/
 #   起脚本),行为完全一致:照旧注入「dsh已重启,继续」、交接记录在场时照旧让位给 dsh-host-sl。

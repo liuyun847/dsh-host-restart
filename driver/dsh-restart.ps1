@@ -1,4 +1,4 @@
-# DSH 重启驱动脚本(由 dsh-host-restart 插件用 WMI 启动)
+﻿# DSH 重启驱动脚本(由 dsh-host-restart 插件用 WMI 启动)
 #
 # 看门狗(`dsh-watchdog.js` + 它的 `dsh-watchdog.vbs` 启动器)是**可选件,不随本仓库发布**:
 #   有它就换手交给它拉起、没有就由本脚本自行拉起 dsh(见下面「流程」的降级分支),
@@ -37,7 +37,9 @@
 #         真机验收时被判 fail closed(2026-09-30)。对不上才退出 4。
 #     · **先杀旧、后起新**:Electron 有单实例锁(requestSingleInstanceLock,第二实例会把已有
 #       窗口聚焦后自杀),所以必须等旧进程全部退出、锁释放,才 Start-Process 冷启动 exe。
-#     · 就绪判据 = **端口可应答 + 主进程在**(默认 19387,插件按 Host 真实端口传 -Port);
+#     · 就绪判据 = **主进程在 + 它这棵进程树里有 loopback 端口可应答**(2026-10-17 起);
+#       0.2.1 的桌面端改用**系统分配端口**、Host argv 里没有 --port,插件传来的 -Port 只是优先尝试项,
+#       拿不到就从这棵进程树的监听端口里找 —— 旧判据在超时后会把正常实例杀掉(两次闪退的根因)。
 #       不再有看门狗换手、不再有"等门户"、不写 dsh-last-url.txt(桌面端没有 token URL)。
 #   自起通道已实测:WMI 创建的 pwsh 里 Start-Process 起的 GUI 进程**能正常显示窗口**
 #   (2026-09-30 用 notepad 做过对照:WMI 创建的 notepad 主窗口句柄非 0)。
@@ -181,6 +183,25 @@ function Get-CommandLineExePath {
         if ($space -gt 0) { $line = $line.Substring(0, $space) }
     }
     return ($line -replace '/', '\').ToLowerInvariant()
+}
+
+# 「这棵应用进程树此刻有没有活的 loopback 监听端口」——返回端口号,没有则 0。
+# 为什么需要它:0.2.1 起桌面端由系统分配端口(dsh-desktop-host 不再传 --port),插件按旧默认值
+# 传下来的 -Port 会**永远等不到**;旧判据于是在 60s 后把正常实例误判成半成品整树杀掉
+# (2026-10-17 实测:窗口连闪两次)。-Port 命中就先用它,命中不了再从树里的监听端口找。
+function Get-DesktopListeningPort {
+    param([string]$ExePath, [int]$PreferredPort = 0)
+    if ($PreferredPort -gt 0 -and (Test-TcpPort -TargetPort $PreferredPort)) { return $PreferredPort }
+    $treePids = @{}
+    foreach ($item in @(Get-DesktopAppProcess -ExePath $ExePath)) { $treePids[[int]$item.ProcessId] = $true }
+    if ($treePids.Count -eq 0) { return 0 }
+    $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $treePids.ContainsKey([int]$_.OwningProcess) } |
+        Select-Object -ExpandProperty LocalPort -Unique)
+    foreach ($candidate in $listeners) {
+        if (Test-TcpPort -TargetPort ([int]$candidate)) { return [int]$candidate }
+    }
+    return 0
 }
 
 # 按 exe 路径扫目标应用的进程(0..n 个)。只按"命令行里的 exe 路径"匹配 ⇒ 只覆盖**这一个安装**,
@@ -676,22 +697,29 @@ if ($Mode -eq 'desktop') {
             continue
         }
 
-        # 就绪判据(两条都要):端口可应答 **且** 目标 exe 的主进程在
+        # 就绪判据(两条都要):目标 exe 的主进程在 **且** 它这棵进程树里有 loopback 端口可应答
         # (端口单独不够 —— 别的进程占着同一个端口也会让 TcpClient 连上)
+        # ⚠ 端口不写死:0.2.1 起用系统分配端口,Host argv 里没有 --port ⇒ -Port 只是优先尝试项,
+        #   拿不到就从树里的监听端口找(见 Get-DesktopListeningPort;旧判据在此误杀过正常实例)。
         $ready = $false
+        $readyPort = 0
         while ((Get-Date) -lt $readyDeadlineTotal) {
-            if ((Test-TcpPort -TargetPort $Port) -and (@(Get-DesktopAppProcess -ExePath $DesktopExe | Where-Object { -not (Test-DesktopTreeMember -Process $_ -ExePath $DesktopExe) }).Count -gt 0)) { $ready = $true; break }
+            $mainsNow = @(Get-DesktopAppProcess -ExePath $DesktopExe | Where-Object { -not (Test-DesktopTreeMember -Process $_ -ExePath $DesktopExe) })
+            if ($mainsNow.Count -gt 0) {
+                $foundPort = Get-DesktopListeningPort -ExePath $DesktopExe -PreferredPort $Port
+                if ($foundPort -gt 0) { $ready = $true; $readyPort = $foundPort; break }
+            }
             if ($launched -and $launched.HasExited) { break }
-            Start-Sleep -Milliseconds 400
+            Start-Sleep -Milliseconds 500
         }
         if ($ready) {
             $mainsAfter = @(Get-DesktopAppProcess -ExePath $DesktopExe | Where-Object { -not (Test-DesktopTreeMember -Process $_ -ExePath $DesktopExe) })
-            Write-RestartLog ('桌面端:新实例已就绪(第 {0} 次尝试,pid={1},端口 {2} 已应答)。会话注入由 dsh-host-restart 插件在新进程里完成。' -f $attempt, (($mainsAfter | ForEach-Object { $_.ProcessId }) -join ','), $Port)
+            Write-RestartLog ('桌面端:新实例已就绪(第 {0} 次尝试,pid={1},端口 {2} 已应答)。会话注入由 dsh-host-restart 插件在新进程里完成。' -f $attempt, (($mainsAfter | ForEach-Object { $_.ProcessId }) -join ','), $readyPort)
             exit 0
         }
 
         $why = @()
-        if ($launched -and $launched.HasExited) { $why += ('进程在就绪前已退出(exit code=' + $launched.ExitCode + ')') } else { $why += '进程存活但端口未在期限内应答' }
+        if ($launched -and $launched.HasExited) { $why += ('进程在就绪前已退出(exit code=' + $launched.ExitCode + ')') } else { $why += ('进程存活但 ' + $DesktopReadySeconds + 's 内这棵进程树里没有可应答的 loopback 监听端口(优先尝试 -Port ' + $Port + ')') }
         $errHead = @(Get-Content -LiteralPath $launchErrFile -TotalCount 3 -ErrorAction SilentlyContinue)
         if ($errHead.Count -gt 0) { $why += ('stderr 首几行=' + (($errHead | ForEach-Object { ([string]$_).Trim() }) -join ' | ')) }
         Write-RestartLog ('桌面端:第 {0}/{1} 次冷启动未就绪 —— {2}' -f $attempt, $DesktopLaunchAttempts, ($why -join ';'))

@@ -1,18 +1,25 @@
 {
   "name": "dsh-host-restart",
-  "description": "DSH 宿主插件:给模型和 /restart 命令提供重启入口；重启前限时等待 dsh-host-sl 的 slHandoff.saveAll 刷新并提交 turn/subagent 工作表，结果报告实际会话 ID 与刷新完整度；job-only 会话及作业结果不会自动恢复；服务失败不阻断重启；重启后由 sessionController 恢复发起会话并注入固定续接消息。支持 web 与 Electron 桌面端。",
-  "version": "0.8.0",
+  "description": "DSH 宿主插件:给模型和 /restart 命令提供重启入口；重启前限时等待 dsh-host-sl 的 slHandoff.saveAll 刷新并提交 turn/subagent 工作表，结果报告实际会话 ID 与刷新完整度；job-only 会话及作业结果不会自动恢复；服务失败不阻断重启；重启后由 sessionController 恢复发起会话并注入固定续接消息（空会话不注入、也不留指令卡片）；支持 web 与 Electron 桌面端。",
+  "version": "0.10.0",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": {
       "default": "./lib/index.js"
     },
+    "./client": {
+      "default": "./lib/client.js"
+    },
     "./package.json": "./package.json"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
     }
   },
   "files": [

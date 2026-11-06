@@ -36,6 +36,7 @@ import {
   readHandoffPendingSummary,
   resolveConfig,
   runHandoffFallback,
+  sessionConversationState,
   summarizeHandoffItems,
 } from '../lib/index.js'
 
@@ -146,6 +147,8 @@ async function bootScene(options = {}) {
   const followups = []
   const agent = {
     status: options.status ?? 'idle',
+    // v0.9.0:空会话判据要读会话事件;不传就保持 undefined(插件按 'unknown' 处理,照旧注入)
+    session: options.session,
     followup: (message) => {
       if (options.followupThrows === true) throw new Error('桩:followup 炸了')
       followups.push(message)
@@ -307,6 +310,82 @@ test('summarizeHandoffItems / findUnhandledHandoffItem:摘要形状与"本会话
   const idle = { exists: true, items: summarizeHandoffItems(handoffMarker([{ sessionId: SESSION_ID, active: false }])) }
   assert.equal(findUnhandledHandoffItem(idle, SESSION_ID).active, false)
   assert.equal(idle.items[0].wake, false, '空闲条目不会被唤醒(但接手判据不看这个)')
+})
+
+// ── A2. 空会话判据(v0.9.0)────────────────────────────────────────────────
+
+test('sessionConversationState:只看对话事件(命令 / 系统 / 权限事件不算)', () => {
+  assert.equal(sessionConversationState(undefined), 'unknown')
+  assert.equal(sessionConversationState({}), 'unknown')
+  assert.equal(sessionConversationState({ log: 'nope' }), 'unknown')
+  assert.equal(sessionConversationState({ log: [] }), 'empty')
+  assert.equal(sessionConversationState({
+    log: [
+      { type: 'session/end-seed' },
+      { type: 'permission/preset' },
+      { type: 'sandbox/mode' },
+      { type: 'command/run' },
+      { type: 'command/done' },
+      { type: 'system/message' },
+    ],
+  }), 'empty', '只有框架/配置事件 ⇒ 空会话')
+  for (const type of ['user/message', 'assistant/message', 'turn/start']) {
+    assert.equal(sessionConversationState({ log: [{ type }] }), 'nonempty', type)
+  }
+  // 公开读面优先:snapshotEvents() 有结果就用它
+  assert.equal(sessionConversationState({ snapshotEvents: () => [{ type: 'user/message' }], log: [] }), 'nonempty')
+  // snapshotEvents() 抛错 ⇒ 退回 .log(不能因此把会话判成空)
+  assert.equal(sessionConversationState({
+    snapshotEvents: () => { throw new Error('桩:快照失败') },
+    log: [{ type: 'turn/start' }],
+  }), 'nonempty')
+  // 快照不是数组 ⇒ 退回 .log
+  assert.equal(sessionConversationState({ snapshotEvents: () => null, log: [{ type: 'user/message' }] }), 'nonempty')
+})
+
+test('启动注入:空会话(只有 /restart 的命令事件)⇒ 不注入、删标记、不排复查', async () => {
+  const scene = await bootScene({
+    session: {
+      log: [
+        { type: 'session/end-seed' },
+        { type: 'command/run', data: { name: 'restart' } },
+        { type: 'command/done', data: {} },
+      ],
+    },
+  })
+  assert.equal(scene.followups.length, 0, '空会话不许凭空开一轮')
+  assert.equal(existsSync(scene.pendingFile), false, '标记仍要消费掉')
+  assert.equal(scene.timers.length, 1, '空会话不排兜底复查')
+  assert.match(scene.log(), /没有任何对话内容\(空会话\),不注入「已重启」/)
+})
+
+test('启动注入:有用户消息 / turn ⇒ 照旧注入(空会话判据不误伤)', async () => {
+  for (const events of [
+    [{ type: 'user/message' }],
+    [{ type: 'session/end-seed' }, { type: 'turn/start' }, { type: 'user/message' }],
+  ]) {
+    const scene = await bootScene({ session: { log: events } })
+    assert.equal(scene.followups.length, 1)
+    assert.equal(scene.injected(), DEFAULT_INJECT_TEXT)
+    assert.doesNotMatch(scene.log(), /没有任何对话内容\(空会话\)/)
+  }
+})
+
+test('启动注入:拿不到会话事件(没有 session / 形态不认识)⇒ 按旧行为注入', async () => {
+  for (const session of [undefined, {}, { log: 'nope' }]) {
+    const scene = await bootScene({ session })
+    assert.equal(scene.followups.length, 1, `session=${JSON.stringify(session)} 时应照旧注入`)
+  }
+})
+
+test('启动注入:空会话优先于交接记录 —— 即使标记里恰好有本会话条目,也不注入', async () => {
+  const scene = await bootScene({
+    session: { log: [{ type: 'command/run' }] },
+    handoff: handoffMarker([{ sessionId: SESSION_ID }]),
+  })
+  assert.equal(scene.followups.length, 0)
+  assert.equal(scene.timers.length, 1, '空会话直接返回,不排复查')
+  assert.match(scene.log(), /没有任何对话内容\(空会话\)/)
 })
 
 // ── B. 让位判据(启动注入)───────────────────────────────────────────────────
